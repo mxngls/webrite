@@ -11,6 +11,7 @@ static OUT_DIR: &str = "out";
 static IN_DIR: &str = "in";
 static BLOCK_DIR: &str = "blocks";
 static HEADER_SEP: &str = "---";
+static DRAFT_DIR: &str = "drafts";
 
 #[derive(Debug)]
 pub enum Error {
@@ -431,7 +432,8 @@ fn process_dir(input_dir: &Path) -> Result<(), Error> {
             let out_path = Path::new(OUT_DIR).join(rel_path);
 
             if typ.is_dir() {
-                if entry.file_name() == BLOCK_DIR {
+                let dir_name = entry.file_name();
+                if dir_name == BLOCK_DIR || dir_name == DRAFT_DIR {
                     continue;
                 }
                 fs::create_dir_all(&out_path).at_path(&out_path)?;
