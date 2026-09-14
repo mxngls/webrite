@@ -89,13 +89,19 @@ impl std::error::Error for ParsePageHeaderError {}
 
 #[derive(Debug)]
 pub enum ReadPageError {
+    EmptyPage,
     MissingHeaderTerminator,
+    MissingHeader,
+    MissingContent,
 }
 
 impl fmt::Display for ReadPageError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match &self {
+            Self::EmptyPage => write!(f, "page is empty"),
             Self::MissingHeaderTerminator => write!(f, "missing header ending '---'"),
+            Self::MissingContent => write!(f, "body has no content"),
+            Self::MissingHeader => write!(f, "header has no content"),
         }
     }
 }
@@ -293,9 +299,9 @@ impl std::fmt::Display for HeaderKey {
 
 #[derive(Debug)]
 struct Page<'a> {
-    page: &'a Path,
+    path: &'a Path,
     headers: PageHeaders<'a>,
-    content: &'a str,
+    body: &'a str,
 }
 
 // impl Page<'_> {
@@ -312,18 +318,44 @@ struct Page<'a> {
 
 fn split_page(page_str: &str) -> Result<(&str, &str), ReadPageError> {
     let mut offset = 0;
-    for line in page_str.split_inclusive('\n') {
-        let line_len = line.len();
-        let trimmed = line.trim();
-        if trimmed == HEADER_SEP || trimmed.is_empty() {
-            let header = &page_str[..offset];
-            let content = &page_str[offset + line_len..];
-            return Ok((header, content));
-        }
-        offset += line_len;
+
+    if page_str.trim().is_empty() {
+        return Err(ReadPageError::EmptyPage);
     }
 
-    Err(ReadPageError::MissingHeaderTerminator)
+    let (header, rest) = page_str
+        .split_inclusive('\n')
+        .find_map(|line| {
+            let trimmed = line.trim();
+            let header_end = offset;
+            let content_start = offset + line.len();
+
+            if trimmed.is_empty() || trimmed == HEADER_SEP {
+                let h = page_str[..header_end].trim();
+                let r = page_str[content_start..].trim();
+                return Some((h, r));
+            }
+
+            offset = content_start;
+
+            None
+        })
+        .ok_or(ReadPageError::MissingHeaderTerminator)?;
+
+    let body = match rest.lines().next() {
+        Some(line) if line == HEADER_SEP => rest[line.len()..].trim_start(),
+        _ => rest,
+    };
+
+    if header.is_empty() {
+        return Err(ReadPageError::MissingHeader);
+    }
+
+    if body.is_empty() {
+        return Err(ReadPageError::MissingContent);
+    }
+
+    Ok((header, body))
 }
 
 fn parse_header(header_block: &str) -> Result<PageHeaders<'_>, ParsePageHeaderError> {
@@ -332,7 +364,7 @@ fn parse_header(header_block: &str) -> Result<PageHeaders<'_>, ParsePageHeaderEr
     for (i, line) in header_block.lines().enumerate() {
         ln = i + 1;
         if line.trim().is_empty() {
-            break;
+            continue;
         }
         let Some((key, val)) = line.split_once(':') else {
             return Err(ParsePageHeaderErrorKind::MissingColon.at(ln));
@@ -353,7 +385,7 @@ fn parse_header(header_block: &str) -> Result<PageHeaders<'_>, ParsePageHeaderEr
 }
 
 fn write_page(page: &Page) -> String {
-    let out_path = Path::new(OUT_DIR).join(page.page);
+    let out_path = Path::new(OUT_DIR).join(page.path);
     // TODO: replace with writing to out file
     out_path.to_string_lossy().into_owned()
 }
@@ -363,17 +395,17 @@ fn process_file(input_path: &Path) -> Result<(), Error> {
     let mut page_string = String::new();
     reader.read_to_string(&mut page_string).at_path(input_path)?;
 
-    let (header, content) = split_page(&page_string).at_path(input_path)?;
-    let headers = parse_header(header).at_path(input_path)?;
+    let (headers, body) = split_page(&page_string).at_path(input_path)?;
+    let headers = parse_header(headers).at_path(input_path)?;
 
     let rel_path = input_path
         .strip_prefix(IN_DIR)
         .expect("file paths descend from the input directory");
 
     let page = Page {
-        page: rel_path,
+        path: rel_path,
         headers,
-        content,
+        body,
     };
     eprintln!("{}", write_page(&page));
 
@@ -425,6 +457,146 @@ fn main() -> process::ExitCode {
                 eprintln!("    {source}");
             }
             process::ExitCode::FAILURE
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    mod split_page {
+        use super::*;
+        use indoc::indoc;
+
+        #[test]
+        fn splits_by_separator() {
+            let page = indoc! {"
+            title: Example
+            description: example post with separator
+            ---
+            <p>Hello, World!</p>"};
+
+            let (header, content) = split_page(page).expect("page to be split by the '---' separator");
+            assert_eq!(header, "title: Example\ndescription: example post with separator");
+            assert_eq!(content, "<p>Hello, World!</p>");
+        }
+
+        #[test]
+        fn splits_by_newlines() {
+            let page = indoc! {"
+            title: Example
+            description: example post with newlines
+
+
+
+            <p>Hello, World!</p>"};
+
+            let (header, content) = split_page(page).expect("page to be split by the '\n' separator");
+            assert_eq!(header, "title: Example\ndescription: example post with newlines");
+            assert_eq!(content, "<p>Hello, World!</p>");
+        }
+
+        #[test]
+        fn splits_by_newlines_and_separator() {
+            let page = indoc! {"
+            title: Example
+            description: example post with separator and newlines
+
+
+            ---
+
+
+            <p>Hello, World!</p>"};
+
+            let (header, content) = split_page(page).expect("page to be split by the '\\n' separator");
+            assert_eq!(
+                header,
+                "title: Example\ndescription: example post with separator and newlines"
+            );
+            assert_eq!(content, "<p>Hello, World!</p>");
+        }
+
+        #[test]
+        fn rejects_empty_page() {
+            let page = "";
+
+            let r = split_page(page);
+            assert!(matches!(r, Err(ReadPageError::EmptyPage)), "got {r:?}");
+        }
+
+        #[test]
+        fn rejects_page_conisting_of_newlines() {
+            let page = "\n\n\n";
+
+            let r = split_page(page);
+            assert!(matches!(r, Err(ReadPageError::EmptyPage)), "got {r:?}");
+        }
+        #[test]
+        fn rejects_missing_separator() {
+            let page = indoc! {"
+            title: Example
+            description: example post with separator and newlines
+            <p>Hello, World!</p>"};
+
+            let r = split_page(page);
+            assert!(matches!(r, Err(ReadPageError::MissingHeaderTerminator)), "got {r:?}");
+        }
+
+        // this is essentially the above test duplicated, but kept as it reads semantically different
+        #[test]
+        fn rejects_missing_separator_with_no_body() {
+            let page = indoc! {"
+            title: Example
+            description: example post with separator and newlines
+            "};
+
+            let r = split_page(page);
+            assert!(matches!(r, Err(ReadPageError::MissingHeaderTerminator)), "got {r:?}");
+        }
+
+        #[test]
+        fn rejects_empty_header_with_separator() {
+            let page = indoc! {"
+            ---
+            <p>Hello, World!</p>"};
+
+            let r = split_page(page);
+            assert!(matches!(r, Err(ReadPageError::MissingHeader)), "got {r:?}");
+        }
+
+        #[test]
+        fn rejects_empty_header_without_separator() {
+            let page = indoc! {"
+
+            <p>Hello, World!</p>"};
+
+            let r = split_page(page);
+            assert!(matches!(r, Err(ReadPageError::MissingHeader)), "got {r:?}");
+        }
+
+        #[test]
+        fn rejects_empty_content_with_separator() {
+            let page = indoc! {"
+            title: Example
+            description: example post with separator and newlines
+            ---"
+            };
+
+            let r = split_page(page);
+            assert!(matches!(r, Err(ReadPageError::MissingContent)), "got {r:?}");
+        }
+
+        #[test]
+        fn rejects_empty_content_without_separator() {
+            let page = indoc! {"
+            title: Example
+            description: example post with separator and newlines
+
+            "};
+
+            let r = split_page(page);
+            assert!(matches!(r, Err(ReadPageError::MissingContent)), "got {r:?}");
         }
     }
 }
