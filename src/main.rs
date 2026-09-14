@@ -474,12 +474,14 @@ mod tests {
         #[test]
         fn splits_by_separator() {
             let page = indoc! {"
-            title: Example
-            description: example post with separator
-            ---
-            <p>Hello, World!</p>"};
+                title: Example
+                description: example post with separator
+                ---
+                <p>Hello, World!</p>
+            "};
 
             let (header, content) = split_page(page).expect("page to be split by the '---' separator");
+
             assert_eq!(header, "title: Example\ndescription: example post with separator");
             assert_eq!(content, "<p>Hello, World!</p>");
         }
@@ -487,14 +489,16 @@ mod tests {
         #[test]
         fn splits_by_newlines() {
             let page = indoc! {"
-            title: Example
-            description: example post with newlines
+                title: Example
+                description: example post with newlines
 
 
 
-            <p>Hello, World!</p>"};
+                <p>Hello, World!</p>
+            "};
 
             let (header, content) = split_page(page).expect("page to be split by the '\n' separator");
+
             assert_eq!(header, "title: Example\ndescription: example post with newlines");
             assert_eq!(content, "<p>Hello, World!</p>");
         }
@@ -502,16 +506,18 @@ mod tests {
         #[test]
         fn splits_by_newlines_and_separator() {
             let page = indoc! {"
-            title: Example
-            description: example post with separator and newlines
+                title: Example
+                description: example post with separator and newlines
 
 
-            ---
+                ---
 
 
-            <p>Hello, World!</p>"};
+                <p>Hello, World!</p>
+            "};
 
             let (header, content) = split_page(page).expect("page to be split by the '\\n' separator");
+
             assert_eq!(
                 header,
                 "title: Example\ndescription: example post with separator and newlines"
@@ -524,6 +530,7 @@ mod tests {
             let page = "";
 
             let r = split_page(page);
+
             assert!(matches!(r, Err(ReadPageError::EmptyPage)), "got {r:?}");
         }
 
@@ -532,16 +539,19 @@ mod tests {
             let page = "\n\n\n";
 
             let r = split_page(page);
+
             assert!(matches!(r, Err(ReadPageError::EmptyPage)), "got {r:?}");
         }
         #[test]
         fn rejects_missing_separator() {
             let page = indoc! {"
-            title: Example
-            description: example post with separator and newlines
-            <p>Hello, World!</p>"};
+                title: Example
+                description: example post with separator and newlines
+                <p>Hello, World!</p>
+            "};
 
             let r = split_page(page);
+
             assert!(matches!(r, Err(ReadPageError::MissingHeaderTerminator)), "got {r:?}");
         }
 
@@ -549,21 +559,24 @@ mod tests {
         #[test]
         fn rejects_missing_separator_with_no_body() {
             let page = indoc! {"
-            title: Example
-            description: example post with separator and newlines
+                title: Example
+                description: example post with separator and newlines
             "};
 
             let r = split_page(page);
+
             assert!(matches!(r, Err(ReadPageError::MissingHeaderTerminator)), "got {r:?}");
         }
 
         #[test]
         fn rejects_empty_header_with_separator() {
             let page = indoc! {"
-            ---
-            <p>Hello, World!</p>"};
+                ---
+                <p>Hello, World!</p>
+            "};
 
             let r = split_page(page);
+
             assert!(matches!(r, Err(ReadPageError::MissingHeader)), "got {r:?}");
         }
 
@@ -571,9 +584,11 @@ mod tests {
         fn rejects_empty_header_without_separator() {
             let page = indoc! {"
 
-            <p>Hello, World!</p>"};
+                <p>Hello, World!</p>
+            "};
 
             let r = split_page(page);
+
             assert!(matches!(r, Err(ReadPageError::MissingHeader)), "got {r:?}");
         }
 
@@ -582,10 +597,11 @@ mod tests {
             let page = indoc! {"
             title: Example
             description: example post with separator and newlines
-            ---"
-            };
+                ---
+            "};
 
             let r = split_page(page);
+
             assert!(matches!(r, Err(ReadPageError::MissingContent)), "got {r:?}");
         }
 
