@@ -595,8 +595,8 @@ mod tests {
         #[test]
         fn rejects_empty_content_with_separator() {
             let page = indoc! {"
-            title: Example
-            description: example post with separator and newlines
+                title: Example
+                description: example post with separator and newlines
                 ---
             "};
 
@@ -604,17 +604,265 @@ mod tests {
 
             assert!(matches!(r, Err(ReadPageError::MissingContent)), "got {r:?}");
         }
+    }
+
+    mod parse_headers {
+        use super::*;
+        use indoc::indoc;
 
         #[test]
-        fn rejects_empty_content_without_separator() {
-            let page = indoc! {"
-            title: Example
-            description: example post with separator and newlines
-
+        fn parse_required_headers() {
+            let header_str = indoc! {"
+                title: Example
+                description: example post with separator and newlines
             "};
 
-            let r = split_page(page);
-            assert!(matches!(r, Err(ReadPageError::MissingContent)), "got {r:?}");
+            let headers = parse_header(header_str).unwrap();
+
+            assert_eq!(headers.title, "Example", "got {:?}", headers.title);
+            assert_eq!(
+                headers.description.unwrap(),
+                "example post with separator and newlines",
+                "got {:?}",
+                headers.description.unwrap()
+            );
+        }
+
+        #[test]
+        fn rejects_missing_title() {
+            let header_str = indoc! {"
+                description: example post without a title
+            "};
+
+            let headers = parse_header(header_str);
+
+            assert!(
+                matches!(
+                    &headers,
+                    Err(ParsePageHeaderError {
+                        line: 1,
+                        kind: ParsePageHeaderErrorKind::MissingRequiredHeader(k),
+                    }) if k == "title"
+                ),
+                "got {headers:?}"
+            );
+        }
+
+        #[test]
+        fn rejects_missing_description_for_post() {
+            let header_str = indoc! {"
+                title: Example
+                is_post: yes
+            "};
+
+            let headers = parse_header(header_str);
+
+            assert!(
+                matches!(
+                    &headers,
+                    Err(ParsePageHeaderError {
+                        line: 2,
+                        kind: ParsePageHeaderErrorKind::MissingRequiredHeader(k),
+                    }) if k == "description"
+                ),
+                "got {headers:?}"
+            );
+        }
+
+        #[test]
+        fn skips_blank_lines() {
+            let header_str = "title: Example\n\n \t \ndescription: example post with blank lines\n";
+
+            let headers = parse_header(header_str).unwrap();
+
+            assert_eq!(headers.title, "Example");
+            assert_eq!(headers.description, Some("example post with blank lines"));
+        }
+
+        #[test]
+        fn trims_whitespace_around_keys_and_values() {
+            let header_str = "  title  :   Example Page  \n\tdescription\t:\texample post with padded fields\t\n";
+
+            let headers = parse_header(header_str).unwrap();
+
+            assert_eq!(headers.title, "Example Page");
+            assert_eq!(headers.description, Some("example post with padded fields"));
+        }
+
+        #[test]
+        fn splits_on_the_first_colon_only() {
+            let header_str = indoc! {"
+                  title: Example: A Post
+                  description: see https://example.com for details
+                  "};
+
+            let headers = parse_header(header_str).unwrap();
+
+            assert_eq!(headers.title, "Example: A Post");
+            assert_eq!(headers.description, Some("see https://example.com for details"));
+        }
+
+        #[test]
+        fn rejects_missing_colon() {
+            let header_str = indoc! {"
+                title Example
+                description: Title header misses a colon
+            "};
+
+            let headers = parse_header(header_str);
+
+            assert!(
+                matches!(
+                    headers,
+                    Err(ParsePageHeaderError {
+                        line: 1,
+                        kind: ParsePageHeaderErrorKind::MissingColon
+                    })
+                ),
+                "got {headers:#?}"
+            );
+        }
+
+        #[test]
+        fn rejects_unkown_key() {
+            let header_str = indoc! {"
+                title: Example
+                subtitle: Our first example
+                description: A post with a subtitle
+            "};
+
+            let headers = parse_header(header_str);
+
+            assert!(
+                matches!(
+                    headers,
+                    Err(ParsePageHeaderError {
+                        line: 2,
+                        kind: ParsePageHeaderErrorKind::UnknownKey(ref key)
+                    }) if key == "subtitle"
+                ),
+                "got {headers:#?}"
+            );
+        }
+
+        #[test]
+        fn rejects_empty_string_key() {
+            let header_str = ": Example\n";
+
+            let headers = parse_header(header_str);
+
+            assert!(
+                matches!(
+                    &headers,
+                    Err(ParsePageHeaderError {
+                        line: 1,
+                        kind: ParsePageHeaderErrorKind::UnknownKey(k),
+                    }) if k.is_empty()
+                ),
+                "got {headers:?}"
+            );
+        }
+
+        #[test]
+        fn rejects_duplicate_boolean_key() {
+            let header_str = indoc! {"
+                title: Example
+                is_post: yes
+                is_post: no
+            "};
+
+            let headers = parse_header(header_str);
+
+            assert!(
+                matches!(
+                    &headers,
+                    Err(ParsePageHeaderError {
+                        line: 3,
+                        kind: ParsePageHeaderErrorKind::DuplicateKey(k),
+                    }) if k == "is_post"
+                ),
+                "got {headers:?}"
+            );
+        }
+
+        #[test]
+        fn ensure_defaults() {
+            let header_str = indoc! {"
+                title: Example
+                description: example post with separator and newlines
+            "};
+
+            let headers = parse_header(header_str).unwrap();
+
+            assert_eq!(headers.class, None, "got {:?}", headers.class);
+            assert_eq!(headers.stylesheet, None, "got {:?}", headers.stylesheet);
+
+            // boolean fields
+            assert!(headers.is_post, "got {:?}", headers.is_post);
+            assert!(headers.include_header, "got {:?}", headers.include_header);
+            assert!(headers.include_footer, "got {:?}", headers.include_footer);
+            assert!(headers.include_title, "got {:?}", headers.include_title);
+            assert!(headers.include_date, "got {:?}", headers.include_date);
+            assert!(headers.include_styles, "got {:?}", headers.include_styles);
+        }
+
+        #[test]
+        fn explicit_defaults_override() {
+            let header_str = indoc! {"
+                title: Example
+                description: example page with every header set explicitly
+
+                class: wide
+                stylesheet: /style/page.css
+
+                is_post: no
+                include_header: no
+                include_footer: no
+                include_title: yes
+                include_date: yes
+                include_styles: yes
+            "};
+
+            let headers = parse_header(header_str).unwrap();
+
+            assert_eq!(headers.class, Some("wide"));
+            assert_eq!(headers.stylesheet, Some("/style/page.css"));
+
+            assert!(!headers.is_post, "got {:?}", headers.is_post);
+
+            // added even despite page not being a post
+            assert!(headers.include_title, "got {:?}", headers.include_title);
+            assert!(headers.include_date, "got {:?}", headers.include_date);
+            assert!(headers.include_styles, "got {:?}", headers.include_styles);
+
+            // set by default
+            assert!(!headers.include_header, "got {:?}", headers.include_header);
+            assert!(!headers.include_footer, "got {:?}", headers.include_footer);
+        }
+
+        #[test]
+        fn accepts_bool_aliases_case_insensitively() {
+            let header_str = indoc! {"
+                  title: Example
+                  description: example post with assorted boolean spellings
+
+                  is_post: YES
+                  include_date: Yes
+                  include_header: y
+
+                  include_styles: NO
+                  include_footer: No
+                  include_title: n
+                  "};
+
+            let headers = parse_header(header_str).unwrap();
+
+            assert!(headers.is_post, "got {:?}", headers.is_post);
+            assert!(headers.include_header, "got {:?}", headers.include_header);
+            assert!(!headers.include_footer, "got {:?}", headers.include_footer);
+            assert!(!headers.include_title, "got {:?}", headers.include_title);
+            assert!(headers.include_date, "got {:?}", headers.include_date);
+            assert!(!headers.include_styles, "got {:?}", headers.include_styles);
         }
     }
 }
