@@ -16,148 +16,10 @@ pub static HEADER_SEP: &str = "---";
 pub static DRAFT_DIR: &str = "drafts";
 
 #[derive(Debug)]
-pub enum Error {
-    Io {
-        path: PathBuf,
-        source: io::Error,
-    },
-    ReadPageHeader {
-        path: PathBuf,
-        source: ReadPageError,
-    },
-    ParsePageHeader {
-        path: PathBuf,
-        source: ParsePageHeaderError,
-    },
-}
-
-trait WithPath: std::error::Error + 'static {
-    fn with_path(self, path: PathBuf) -> Error;
-}
-
-pub trait PathContext<T> {
-    fn at_path(self, path: impl Into<PathBuf>) -> Result<T, Error>;
-}
-
-impl<T, E: WithPath> PathContext<T> for Result<T, E> {
-    fn at_path(self, path: impl Into<PathBuf>) -> Result<T, Error> {
-        self.map_err(|e| e.with_path(path.into()))
-    }
-}
-
-impl WithPath for io::Error {
-    fn with_path(self, path: PathBuf) -> Error {
-        Error::Io { path, source: self }
-    }
-}
-
-impl WithPath for ReadPageError {
-    fn with_path(self, path: PathBuf) -> Error {
-        Error::ReadPageHeader { path, source: self }
-    }
-}
-
-impl WithPath for ParsePageHeaderError {
-    fn with_path(self, path: PathBuf) -> Error {
-        Error::ParsePageHeader { path, source: self }
-    }
-}
-
-impl fmt::Display for Error {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Io { path, .. } | Self::ReadPageHeader { path, .. } => {
-                write!(f, "{}", path.display())
-            }
-            Self::ParsePageHeader { path, source } => {
-                write!(f, "{}:{}", path.display(), source.line)
-            }
-        }
-    }
-}
-
-impl std::error::Error for Error {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        match self {
-            Self::Io { source, .. } => Some(source),
-            Self::ReadPageHeader { source, .. } => Some(source),
-            Self::ParsePageHeader { source, .. } => Some(source),
-        }
-    }
-}
-
-impl std::error::Error for ReadPageError {}
-
-impl std::error::Error for ParsePageHeaderError {}
-
-#[derive(Debug)]
-pub enum ReadPageError {
-    EmptyPage,
-    MissingHeaderTerminator,
-    MissingHeader,
-    MissingContent,
-}
-
-impl fmt::Display for ReadPageError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match &self {
-            Self::EmptyPage => write!(f, "page is empty"),
-            Self::MissingHeaderTerminator => write!(f, "missing header ending '---'"),
-            Self::MissingContent => write!(f, "body has no content"),
-            Self::MissingHeader => write!(f, "header has no content"),
-        }
-    }
-}
-
-#[derive(Debug)]
-pub struct ParsePageHeaderError {
-    line: usize,
-    kind: ParsePageHeaderErrorKind,
-}
-
-#[derive(Debug)]
-enum ParsePageHeaderErrorKind {
-    MissingColon,
-    MissingValue(String),
-    MissingRequiredHeader(String),
-    UnknownKey(String),
-    DuplicateKey(String),
-    InvalidBool(String),
-}
-
-impl ParsePageHeaderErrorKind {
-    const fn at(self, line: usize) -> ParsePageHeaderError {
-        ParsePageHeaderError { line, kind: self }
-    }
-}
-
-impl fmt::Display for ParsePageHeaderError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match &self.kind {
-            ParsePageHeaderErrorKind::MissingColon => write!(f, "missing ':'"),
-            ParsePageHeaderErrorKind::MissingRequiredHeader(k) => write!(f, "missing required '{k}' header"),
-            ParsePageHeaderErrorKind::MissingValue(k) => write!(f, "missing value for '{k}' header"),
-            ParsePageHeaderErrorKind::UnknownKey(k) => write!(f, "unkown header key '{k}'"),
-            ParsePageHeaderErrorKind::DuplicateKey(k) => write!(f, "duplicate header key '{k}"),
-            ParsePageHeaderErrorKind::InvalidBool(k) => {
-                write!(f, "valid values for '{k}' are 'yes' ('y') or 'no' ('n')")
-            }
-        }
-    }
-}
-
-#[allow(clippy::struct_excessive_bools)]
-#[derive(Debug, Default)]
-struct PageHeadersBuilder<'a> {
-    title: Option<&'a str>,
-    description: Option<&'a str>,
-    class: Option<&'a str>,
-    stylesheet: Option<&'a str>,
-    is_post: Option<bool>,
-    include_header: Option<bool>,
-    include_footer: Option<bool>,
-    include_title: Option<bool>,
-    include_styles: Option<bool>,
+pub struct Page<'a> {
+    pub path: &'a Path,
+    pub headers: PageHeaders<'a>,
+    pub body: &'a str,
 }
 
 #[allow(clippy::struct_excessive_bools)]
@@ -174,6 +36,20 @@ pub struct PageHeaders<'a> {
     include_styles: bool,
 }
 
+#[allow(clippy::struct_excessive_bools)]
+#[derive(Debug, Default)]
+struct PageHeadersBuilder<'a> {
+    title: Option<&'a str>,
+    description: Option<&'a str>,
+    class: Option<&'a str>,
+    stylesheet: Option<&'a str>,
+    is_post: Option<bool>,
+    include_header: Option<bool>,
+    include_footer: Option<bool>,
+    include_title: Option<bool>,
+    include_styles: Option<bool>,
+}
+
 impl<'a> PageHeadersBuilder<'a> {
     fn set_once<T>(field: &mut Option<T>, key: &HeaderKey, val: T) -> Result<(), ParsePageHeaderErrorKind> {
         if field.is_some() {
@@ -181,6 +57,14 @@ impl<'a> PageHeadersBuilder<'a> {
         }
         *field = Some(val);
         Ok(())
+    }
+
+    fn parse_bool(val: &str) -> Result<bool, ParsePageHeaderErrorKind> {
+        match val.trim().to_ascii_lowercase().as_str() {
+            "y" | "yes" => Ok(true),
+            "n" | "no" => Ok(false),
+            _ => Err(ParsePageHeaderErrorKind::InvalidBool(val.trim().to_owned())),
+        }
     }
 
     fn set(&mut self, key: &HeaderKey, val: &'a str) -> Result<(), ParsePageHeaderErrorKind> {
@@ -230,14 +114,6 @@ impl<'a> PageHeadersBuilder<'a> {
             include_title: self.include_title.unwrap_or(is_post),
             include_styles: self.include_styles.unwrap_or(is_post),
         })
-    }
-
-    fn parse_bool(val: &str) -> Result<bool, ParsePageHeaderErrorKind> {
-        match val.trim().to_ascii_lowercase().as_str() {
-            "y" | "yes" => Ok(true),
-            "n" | "no" => Ok(false),
-            _ => Err(ParsePageHeaderErrorKind::InvalidBool(val.trim().to_owned())),
-        }
     }
 }
 
@@ -291,13 +167,6 @@ impl std::fmt::Display for HeaderKey {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.as_str())
     }
-}
-
-#[derive(Debug)]
-pub struct Page<'a> {
-    pub path: &'a Path,
-    pub headers: PageHeaders<'a>,
-    pub body: &'a str,
 }
 
 pub fn split_page(page_str: &str) -> Result<(&str, &str), ReadPageError> {
@@ -434,6 +303,137 @@ pub fn write_page(page: &Page) -> Result<(), Error> {
 }
 
 
+
+#[derive(Debug)]
+pub enum Error {
+    Io {
+        path: PathBuf,
+        source: io::Error,
+    },
+    ReadPageHeader {
+        path: PathBuf,
+        source: ReadPageError,
+    },
+    ParsePageHeader {
+        path: PathBuf,
+        source: ParsePageHeaderError,
+    },
+}
+
+impl fmt::Display for Error {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Io { path, .. } | Self::ReadPageHeader { path, .. } => {
+                write!(f, "{}", path.display())
+            }
+            Self::ParsePageHeader { path, source } => {
+                write!(f, "{}:{}", path.display(), source.line)
+            }
+        }
+    }
+}
+
+impl std::error::Error for Error {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Io { source, .. } => Some(source),
+            Self::ReadPageHeader { source, .. } => Some(source),
+            Self::ParsePageHeader { source, .. } => Some(source),
+        }
+    }
+}
+
+trait WithPath: std::error::Error + 'static {
+    fn with_path(self, path: PathBuf) -> Error;
+}
+
+pub trait PathContext<T> {
+    fn at_path(self, path: impl Into<PathBuf>) -> Result<T, Error>;
+}
+
+impl<T, E: WithPath> PathContext<T> for Result<T, E> {
+    fn at_path(self, path: impl Into<PathBuf>) -> Result<T, Error> {
+        self.map_err(|e| e.with_path(path.into()))
+    }
+}
+
+impl WithPath for io::Error {
+    fn with_path(self, path: PathBuf) -> Error {
+        Error::Io { path, source: self }
+    }
+}
+
+#[derive(Debug)]
+pub enum ReadPageError {
+    EmptyPage,
+    MissingHeaderTerminator,
+    MissingHeader,
+    MissingContent,
+}
+
+impl fmt::Display for ReadPageError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match &self {
+            Self::EmptyPage => write!(f, "page is empty"),
+            Self::MissingHeaderTerminator => write!(f, "missing header ending '---'"),
+            Self::MissingContent => write!(f, "body has no content"),
+            Self::MissingHeader => write!(f, "header has no content"),
+        }
+    }
+}
+
+impl std::error::Error for ReadPageError {}
+
+impl WithPath for ReadPageError {
+    fn with_path(self, path: PathBuf) -> Error {
+        Error::ReadPageHeader { path, source: self }
+    }
+}
+
+#[derive(Debug)]
+pub struct ParsePageHeaderError {
+    line: usize,
+    kind: ParsePageHeaderErrorKind,
+}
+
+impl fmt::Display for ParsePageHeaderError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match &self.kind {
+            ParsePageHeaderErrorKind::MissingColon => write!(f, "missing ':'"),
+            ParsePageHeaderErrorKind::MissingRequiredHeader(k) => write!(f, "missing required '{k}' header"),
+            ParsePageHeaderErrorKind::MissingValue(k) => write!(f, "missing value for '{k}' header"),
+            ParsePageHeaderErrorKind::UnknownKey(k) => write!(f, "unkown header key '{k}'"),
+            ParsePageHeaderErrorKind::DuplicateKey(k) => write!(f, "duplicate header key '{k}"),
+            ParsePageHeaderErrorKind::InvalidBool(k) => {
+                write!(f, "valid values for '{k}' are 'yes' ('y') or 'no' ('n')")
+            }
+        }
+    }
+}
+
+impl std::error::Error for ParsePageHeaderError {}
+
+impl WithPath for ParsePageHeaderError {
+    fn with_path(self, path: PathBuf) -> Error {
+        Error::ParsePageHeader { path, source: self }
+    }
+}
+
+#[derive(Debug)]
+enum ParsePageHeaderErrorKind {
+    MissingColon,
+    MissingValue(String),
+    MissingRequiredHeader(String),
+    UnknownKey(String),
+    DuplicateKey(String),
+    InvalidBool(String),
+}
+
+impl ParsePageHeaderErrorKind {
+    const fn at(self, line: usize) -> ParsePageHeaderError {
+        ParsePageHeaderError { line, kind: self }
+    }
+}
 
 #[cfg(test)]
 mod tests {
