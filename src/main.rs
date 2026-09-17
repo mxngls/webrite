@@ -5,7 +5,7 @@ use std::{fs, io, process};
 mod page;
 
 use crate::page::{
-    BLOCK_DIR, DRAFT_DIR, Error, IN_DIR, OUT_DIR, Page, PathContext, parse_header, split_page, write_page,
+    BLOCK_DIR, DRAFT_DIR, Error, IN_DIR, OUT_DIR, Page, PathContext, parse_header, render_page, split_page, write_page,
 };
 
 fn process_file(input_path: &Path) -> Result<(), Error> {
@@ -26,7 +26,9 @@ fn process_file(input_path: &Path) -> Result<(), Error> {
         body,
     };
 
-    write_page(&page)?;
+    let rendered_page = render_page(&page);
+
+    write_page(&page, &rendered_page)?;
 
     Ok(())
 }

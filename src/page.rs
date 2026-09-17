@@ -1,12 +1,9 @@
 use std::fmt;
 use std::fs;
-use std::fs::File;
 use std::io;
-use std::io::Read;
 use std::io::Write;
 use std::path::Path;
 use std::path::PathBuf;
-use std::process;
 use std::str::FromStr;
 
 pub static OUT_DIR: &str = "out";
@@ -237,77 +234,89 @@ pub fn parse_header(header_block: &str) -> Result<PageHeaders<'_>, ParsePageHead
     headers_builder.build().map_err(|k| k.at(ln))
 }
 
-fn write_head_tag(headers: &PageHeaders, out_path: &PathBuf, out_file: &mut File) -> Result<(), Error> {
-    let title = format!("<title>{}</title>\n\"", headers.title);
-    let description_meta = headers
-        .description
-        .map(|d| format!("<meta name=\"description\" content=\"{d}\">"))
-        .unwrap_or_default();
-    write!(
-        out_file,
-        "<!DOCTYPE html>\n\
-	     <html lang=\"en\">\n\
-	     <head>\n\
-         {title}
-         {description_meta}",
-    )
-    .at_path(out_path)?;
-
-    write!(
-        out_file,
-        "<link href=\"/feed.atom\"type=\"application/atom+xml\"rel=\"alternate\"/>"
-    )
-    .at_path(out_path)?;
-
-    Ok(())
+pub fn escape_html(s: &str) -> impl fmt::Display + '_ {
+    fmt::from_fn(move |f| {
+        let mut last = 0;
+        for (i, b) in s.bytes().enumerate() {
+            let escaped = match b {
+                b'&' => "&amp;",
+                b'>' => "&lt;",
+                b'<' => "&gt;",
+                b'"' => "&quot;",
+                b'\'' => "&#39;",
+                _ => continue,
+            };
+            f.write_str(&s[last..i])?;
+            f.write_str(escaped)?;
+            last = i + 1;
+        }
+        f.write_str(&s[last..])
+    })
 }
 
-fn write_body_tag(headers: &PageHeaders, out_path: &PathBuf, out_file: &mut File) -> Result<(), Error> {
-    let class_div = headers
-        .class
-        .map(|c| format!("<div id=\"wrap\"class=\"{c}\">"))
-        .unwrap_or_default();
-    let header_tag = headers.include_header.then(|| format!("<header></header"));
-    write!(
-        out_file,
-        "<body>\n\
-         {class_div}"
-    )
-    .at_path(out_path)?;
-
-    if headers.is_post {
-        write!(out_file, "<article>").at_path(out_path)?;
-    }
-
-    if headers.include_title {
-        write!(out_file, "<h1>{}</h1>", headers.title).at_path(out_path)?;
-    }
-
-    if headers.is_post {
-        write!(out_file, "</article>").at_path(out_path)?;
-    }
-
-    Ok(())
-}
-
-pub fn write_page(page: &Page) -> Result<(), Error> {
+pub fn render_page(page: &Page) -> String {
     let headers = &page.headers;
 
-    let out_path = Path::new(OUT_DIR).join(page.path);
-    let mut out_file = File::create(&out_path).at_path(&out_path)?;
+    let escaped_page_title = escape_html(headers.title);
+    let page_body = &page.body;
 
-    write_head_tag(headers, &out_path, &mut out_file)?;
-    write_body_tag(headers, &out_path, &mut out_file)?;
+    let description_meta = headers
+        .description
+        .map(|d| format!("<meta name=\"description\" content=\"{d}\">\n"))
+        .unwrap_or_default();
+    let class_attr = headers.class.map(|c| format!(" class=\"{c}\"")).unwrap_or_default();
 
-    Ok(())
+    // TODO: Fill in placeholder with actual parsed header block
+    let header = if headers.include_header {
+        "<header></header>\n"
+    } else {
+        ""
+    };
+
+    let header_tag = if headers.include_title {
+        format!("<h1>{escaped_page_title}</h1>\n")
+    } else {
+        String::new()
+    };
+
+    let content = format!("{header_tag}{page_body}\n");
+    let content = if headers.is_post {
+        format!("<article>\n{content}</article>\n")
+    } else {
+        content
+    };
+
+    format!(
+        "<!DOCTYPE html>\n\
+         <html lang=\"en\">\n\
+             <head>\n\
+                 <title>{escaped_page_title}</title>\n\
+                 {description_meta}\
+                 <link href=\"/feed.atom\" type=\"application/atom+xml\" rel=\"alternate\"/>\n\
+             </head>\n\
+             <body>\n\
+                 <div id=\"wrap\"{class_attr}>\n\
+                     {header}\
+                     <main>\n\
+                         {content}\
+                     </main>\n\
+                 </div>\n\
+             </body>\n\
+         </html>\n"
+    )
 }
 
+pub fn write_page(page: &Page, page_str: &str) -> Result<(), Error> {
+    let out_path = Path::new(OUT_DIR).join(page.path);
+    let mut out_file = fs::File::create(&out_path).at_path(&out_path)?;
 
+    write!(out_file, "{page_str}").at_path(&out_path)
+}
 
 #[derive(Debug)]
 pub enum Error {
     Io {
-        path: PathBuf,
+        path: Option<PathBuf>,
         source: io::Error,
     },
     ReadPageHeader {
@@ -323,8 +332,11 @@ pub enum Error {
 impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::Io { path, .. } | Self::ReadPageHeader { path, .. } => {
+            Self::Io { path: Some(path), .. } | Self::ReadPageHeader { path, .. } => {
                 write!(f, "{}", path.display())
+            }
+            Self::Io { path: None, .. } => {
+                write!(f, "I/O error")
             }
             Self::ParsePageHeader { path, source } => {
                 write!(f, "{}:{}", path.display(), source.line)
@@ -359,7 +371,10 @@ impl<T, E: WithPath> PathContext<T> for Result<T, E> {
 
 impl WithPath for io::Error {
     fn with_path(self, path: PathBuf) -> Error {
-        Error::Io { path, source: self }
+        Error::Io {
+            path: Some(path),
+            source: self,
+        }
     }
 }
 
