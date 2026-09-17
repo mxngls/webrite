@@ -1,7 +1,6 @@
 use std::fmt;
 use std::fs;
 use std::io;
-use std::io::Write;
 use std::path::Path;
 use std::path::PathBuf;
 use std::str::FromStr;
@@ -254,43 +253,50 @@ pub fn escape_html(s: &str) -> impl fmt::Display + '_ {
     })
 }
 
+fn render_content(page: &Page) -> String {
+    let body = page.body;
+    let heading = if page.headers.include_title {
+        format!("<h1>{}</h1>\n", escape_html(page.headers.title))
+    } else {
+        String::new()
+    };
+
+    let content = format!("{heading}{body}\n");
+
+    if page.headers.is_post {
+        format!("<article>\n{content}</article>\n")
+    } else {
+        content
+    }
+}
+
 pub fn render_page(page: &Page) -> String {
     let headers = &page.headers;
 
-    let escaped_page_title = escape_html(headers.title);
-    let page_body = &page.body;
+    let escaped_title = escape_html(headers.title);
 
     let description_meta = headers
         .description
-        .map(|d| format!("<meta name=\"description\" content=\"{d}\">\n"))
+        .map(|d| format!("<meta name=\"description\" content=\"{}\">\n", escape_html(d)))
         .unwrap_or_default();
     let class_attr = headers.class.map(|c| format!(" class=\"{c}\"")).unwrap_or_default();
 
     // TODO: Fill in placeholder with actual parsed header block
     let header = if headers.include_header {
-        "<header></header>\n"
+        todo!("block extraction not yet implemented")
     } else {
         ""
     };
 
-    let header_tag = if headers.include_title {
-        format!("<h1>{escaped_page_title}</h1>\n")
-    } else {
-        String::new()
-    };
+    let content = render_content(page);
 
-    let content = format!("{header_tag}{page_body}\n");
-    let content = if headers.is_post {
-        format!("<article>\n{content}</article>\n")
-    } else {
-        content
-    };
-
+    // Indentation is only for the convencience of the reader of this __source code__;
+    // actual HTML output will be flat.
     format!(
         "<!DOCTYPE html>\n\
          <html lang=\"en\">\n\
              <head>\n\
-                 <title>{escaped_page_title}</title>\n\
+                 <title>{escaped_title}</title>\n\
                  {description_meta}\
                  <link href=\"/feed.atom\" type=\"application/atom+xml\" rel=\"alternate\"/>\n\
              </head>\n\
@@ -306,11 +312,10 @@ pub fn render_page(page: &Page) -> String {
     )
 }
 
-pub fn write_page(page: &Page, page_str: &str) -> Result<(), Error> {
+pub fn write_page(page: &Page) -> Result<(), Error> {
     let out_path = Path::new(OUT_DIR).join(page.path);
-    let mut out_file = fs::File::create(&out_path).at_path(&out_path)?;
 
-    write!(out_file, "{page_str}").at_path(&out_path)
+    fs::write(&out_path, render_page(page)).at_path(&out_path)
 }
 
 #[derive(Debug)]

@@ -5,7 +5,7 @@ use std::{fs, io, process};
 mod page;
 
 use crate::page::{
-    BLOCK_DIR, DRAFT_DIR, Error, IN_DIR, OUT_DIR, Page, PathContext, parse_header, render_page, split_page, write_page,
+    BLOCK_DIR, DRAFT_DIR, Error, IN_DIR, OUT_DIR, Page, PathContext, parse_header, split_page, write_page,
 };
 
 fn process_file(input_path: &Path) -> Result<(), Error> {
@@ -20,17 +20,11 @@ fn process_file(input_path: &Path) -> Result<(), Error> {
         .strip_prefix(IN_DIR)
         .expect("file paths descend from the input directory");
 
-    let page = Page {
+    write_page(&Page {
         path: rel_path,
         headers,
         body,
-    };
-
-    let rendered_page = render_page(&page);
-
-    write_page(&page, &rendered_page)?;
-
-    Ok(())
+    })
 }
 
 fn process_dir(input_dir: &Path) -> Result<(), Error> {
