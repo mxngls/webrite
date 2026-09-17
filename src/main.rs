@@ -20,11 +20,7 @@ fn process_file(input_path: &Path) -> Result<(), Error> {
         .strip_prefix(IN_DIR)
         .expect("file paths descend from the input directory");
 
-    write_page(&Page {
-        path: rel_path,
-        headers,
-        body,
-    })
+    write_page(&Page::new(rel_path, headers, body))
 }
 
 fn process_dir(input_dir: &Path) -> Result<(), Error> {
