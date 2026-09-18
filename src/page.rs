@@ -270,8 +270,8 @@ fn render_head(page: &Page) -> String {
         .map(|d| format!("<meta name=\"description\" content=\"{}\">\n", escape_html(d)))
         .unwrap_or_default();
 
-    let custom_style_link = headers.stylesheet.map_or_else(String::new, |stylesheet| {
-        format!("<link href=\"{stylesheet}\" rel=\"stylesheet\"/>\n")
+    let custom_style_link = headers.stylesheet.map_or_else(String::new, |s| {
+        format!("<link href=\"{}\" rel=\"stylesheet\"/>\n", escape_html(s))
     });
 
     let style_link = if headers.include_styles {
@@ -1032,6 +1032,25 @@ mod tests {
                 page.contains(&format!(
                     "<div id=\"{DEFAULT_WRAP_ID}\" class=\"&quot;class_with_quotes&quot;\">"
                 )),
+                "got {page}"
+            );
+        }
+
+        #[test]
+        fn escapes_stylesheet() {
+            let headers = PageHeadersBuilder {
+                title: Some("Test"),
+                stylesheet: Some("/styles/\"custom.css\""),
+                is_post: Some(false),
+                ..Default::default()
+            }
+            .build()
+            .unwrap();
+
+            let page = render_page(&default_page(headers));
+
+            assert!(
+                page.contains("<link href=\"/styles/&quot;custom.css&quot;\" rel=\"stylesheet\"/>"),
                 "got {page}"
             );
         }
