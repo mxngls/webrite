@@ -10,6 +10,7 @@ pub static IN_DIR: &str = "in";
 pub static BLOCK_DIR: &str = "blocks";
 pub static HEADER_SEP: &str = "---";
 pub static DRAFT_DIR: &str = "drafts";
+pub static DEFAULT_STYLESHEET: &str = "/style.css";
 
 #[derive(Debug)]
 pub struct Page<'a> {
@@ -268,10 +269,22 @@ fn render_head(page: &Page) -> String {
         .map(|d| format!("<meta name=\"description\" content=\"{}\">\n", escape_html(d)))
         .unwrap_or_default();
 
+    let custom_style_link = headers.stylesheet.map_or_else(String::new, |stylesheet| {
+        format!("<link href=\"{stylesheet}\" rel=\"stylesheet\"/>\n")
+    });
+
+    let style_link = if headers.include_styles {
+        format!("<link href=\"{DEFAULT_STYLESHEET}\" rel=\"stylesheet\"/>\n")
+    } else {
+        String::new()
+    };
+
     format!(
         "<head>\n\
              <title>{escaped_title}</title>\n\
              {description_meta}\
+             {custom_style_link}\
+             {style_link}\
              <link href=\"/feed.atom\" type=\"application/atom+xml\" rel=\"alternate\"/>\n\
          </head>\n\
          "
