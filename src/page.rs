@@ -298,7 +298,10 @@ fn render_content(page: &Page) -> String {
 pub fn render_page(page: &Page) -> String {
     let headers = &page.headers;
 
-    let class_attr = headers.class.map(|c| format!(" class=\"{c}\"")).unwrap_or_default();
+    let class_attr = headers
+        .class
+        .map(|c| format!(" class=\"{}\"", escape_html(c)))
+        .unwrap_or_default();
 
     // TODO: Fill in placeholder with actual parsed header block
     let header = if headers.include_header {
