@@ -269,6 +269,25 @@ pub fn escape_html(s: &str) -> impl fmt::Display + '_ {
     })
 }
 
+fn render_head(page: &Page) -> String {
+    let headers = &page.headers;
+    let escaped_title = escape_html(headers.title);
+
+    let description_meta = headers
+        .description
+        .map(|d| format!("<meta name=\"description\" content=\"{}\">\n", escape_html(d)))
+        .unwrap_or_default();
+
+    format!(
+        "<head>\n\
+             <title>{escaped_title}</title>\n\
+             {description_meta}\
+             <link href=\"/feed.atom\" type=\"application/atom+xml\" rel=\"alternate\"/>\n\
+         </head>\n\
+         "
+    )
+}
+
 fn render_content(page: &Page) -> String {
     let body = page.body;
     let heading = if page.headers.include_title {
@@ -289,12 +308,6 @@ fn render_content(page: &Page) -> String {
 pub fn render_page(page: &Page) -> String {
     let headers = &page.headers;
 
-    let escaped_title = escape_html(headers.title);
-
-    let description_meta = headers
-        .description
-        .map(|d| format!("<meta name=\"description\" content=\"{}\">\n", escape_html(d)))
-        .unwrap_or_default();
     let class_attr = headers.class.map(|c| format!(" class=\"{c}\"")).unwrap_or_default();
 
     // TODO: Fill in placeholder with actual parsed header block
@@ -311,6 +324,7 @@ pub fn render_page(page: &Page) -> String {
         ""
     };
 
+    let head = render_head(page);
     let content = render_content(page);
 
     // Indentation is only for the convencience of the reader of this __source code__;
@@ -318,16 +332,14 @@ pub fn render_page(page: &Page) -> String {
     format!(
         "<!DOCTYPE html>\n\
          <html lang=\"en\">\n\
-             <head>\n\
-                 <title>{escaped_title}</title>\n\
-                 {description_meta}\
-                 <link href=\"/feed.atom\" type=\"application/atom+xml\" rel=\"alternate\"/>\n\
-             </head>\n\
+             {head}\
              <body>\n\
                  <div id=\"wrap\"{class_attr}>\n\
                      {header}\
                      <main>\n\
+                         <!-- content start -->\n\
                          {content}\
+                         <!-- content end -->\n\
                      </main>\n\
                      {footer}\
                  </div>\n\
