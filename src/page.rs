@@ -1,4 +1,4 @@
-use std::fmt;
+use std::fmt::{self, Write};
 use std::fs;
 use std::io;
 use std::path::Path;
@@ -11,6 +11,7 @@ pub static BLOCK_DIR: &str = "blocks";
 pub static HEADER_SEP: &str = "---";
 pub static DRAFT_DIR: &str = "drafts";
 pub static DEFAULT_STYLESHEET: &str = "/style.css";
+pub static DEFAULT_WRAP_ID: &str = "wrap";
 
 #[derive(Debug)]
 pub struct Page<'a> {
@@ -340,7 +341,7 @@ pub fn render_page(page: &Page) -> String {
          <html lang=\"en\">\n\
              {head}\
              <body>\n\
-                 <div id=\"wrap\"{class_attr}>\n\
+                 <div id=\"{DEFAULT_WRAP_ID}\"{class_attr}>\n\
                      {header}\
                      <main>\n\
                          <!-- content start -->\n\
@@ -892,6 +893,257 @@ mod tests {
             assert!(!headers.include_footer, "got {:?}", headers.include_footer);
             assert!(!headers.include_title, "got {:?}", headers.include_title);
             assert!(!headers.include_styles, "got {:?}", headers.include_styles);
+        }
+    }
+
+    mod render_page {
+        use super::*;
+        use std::env;
+
+        fn default_page(headers: PageHeaders) -> Page {
+            Page::new(Path::new("full.html"), headers, "<p>example page body</p>")
+        }
+
+        fn headers_full() -> PageHeaders<'static> {
+            PageHeaders {
+                title: "Example Post",
+                description: Some("An example post"),
+                class: Some("post"),
+                stylesheet: Some("/styles/example.css"),
+                is_post: true,
+                include_header: true,
+                include_footer: true,
+                include_title: true,
+                include_styles: true,
+            }
+        }
+
+        fn diff(actual: &str, expected: &str) -> Result<String, fmt::Error> {
+            let act_len = actual.lines().count();
+            let exp_len = expected.lines().count();
+
+            let start = actual.lines().zip(expected.lines()).take_while(|(a, e)| a == e).count();
+            let end = actual
+                .lines()
+                .rev()
+                .zip(expected.lines().rev())
+                .take_while(|(e, a)| a == e)
+                .count()
+                .min(act_len.min(exp_len) - start);
+
+            let mut out = String::new();
+
+            writeln!(out, "--- expected")?;
+            writeln!(out, "+++ actual")?;
+            for (i, l) in expected.lines().enumerate().skip(start).take(exp_len - start - end) {
+                writeln!(out, "-{:>4}   {l}", i + 1)?;
+            }
+            for (i, l) in actual.lines().enumerate().skip(start).take(act_len - start - end) {
+                writeln!(out, "+{:>4}   {l}", i + 1)?;
+            }
+
+            Ok(out)
+        }
+
+        fn compare_page_snapshot(page_name: &str, actual: &str) {
+            let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/snapshots");
+            let path = dir.join(page_name);
+
+            if env::var_os("WEBRITE_UPDATE_SNAPSHOTS").is_some() {
+                fs::create_dir_all(&dir).unwrap_or_else(|_| panic!("Directory {} to be createable", dir.display()));
+                fs::write(&path, actual).unwrap_or_else(|_| panic!("Snapshot to be writeable to {}", path.display()));
+            }
+
+            let expected = fs::read_to_string(&path).unwrap_or_else(|e| {
+                panic!(
+                    "cannot read snapshot {}: {e}\nrun `WEBRITE_UPDATE_SNAPSHOTS=1 cargo test` to create it",
+                    path.display()
+                );
+            });
+
+            if actual == expected {
+                return;
+            }
+
+            panic!(
+                "snapshot mismatch: {}\n{}run `WEBRITE_UPDATE_SNAPSHOTS=1 cargo test` to update",
+                path.display(),
+                diff(actual, &expected).unwrap(),
+            );
+        }
+
+        #[test]
+        fn full_page() {
+            compare_page_snapshot("full.html", &render_page(&default_page(headers_full())));
+        }
+
+        #[test]
+        fn minimal_page() {
+            let headers_minimal = PageHeadersBuilder {
+                title: Some("Minimal"),
+                is_post: Some(false),
+                ..Default::default() // 1. default styles NOT included
+                                     // 2. NO post title header included
+                                     // 3. content NOT wrapped in article tag
+            }
+            .build()
+            .unwrap();
+
+            compare_page_snapshot("minimal.html", &render_page(&default_page(headers_minimal)));
+        }
+
+        #[test]
+        fn escapes_title() {
+            let headers = PageHeadersBuilder {
+                title: Some("Post title escaped in <head> tag"),
+                is_post: Some(true),
+                description: Some("Post title escaped"),
+                ..Default::default()
+            }
+            .build()
+            .unwrap();
+
+            let page = render_page(&default_page(headers));
+
+            assert!(
+                page.contains("<title>Post title escaped in &lt;head&gt; tag</title>"),
+                "got {page}"
+            );
+            assert!(
+                page.contains("<h1>Post title escaped in &lt;head&gt; tag</h1>"),
+                "got {page}"
+            );
+        }
+
+        #[test]
+        fn escapes_classes() {
+            let headers = PageHeadersBuilder {
+                title: Some("Test"),
+                class: Some("\"class_with_quotes\""),
+                is_post: Some(false),
+                ..Default::default()
+            }
+            .build()
+            .unwrap();
+
+            let page = render_page(&default_page(headers));
+
+            assert!(
+                page.contains(&format!(
+                    "<div id=\"{DEFAULT_WRAP_ID}\" class=\"&quot;class_with_quotes&quot;\">"
+                )),
+                "got {page}"
+            );
+        }
+
+        #[test]
+        fn minimal_post() {
+            let headers_minimal_post = PageHeadersBuilder {
+                title: Some("Minimal Post"),
+                description: Some("Minimal post with description"),
+                is_post: Some(true),
+                ..Default::default()
+            }
+            .build()
+            .unwrap();
+
+            compare_page_snapshot("minimal_post.html", &render_page(&default_page(headers_minimal_post)));
+        }
+
+        #[test]
+        fn post_can_omit_title_and_default_styles() {
+            let headers = PageHeadersBuilder {
+                title: Some("Post"),
+                description: Some("Post without title and default styles"),
+                stylesheet: Some("/styles/post.css"),
+                is_post: Some(true),
+                include_title: Some(false),
+                include_styles: Some(false),
+                ..Default::default()
+            }
+            .build()
+            .unwrap();
+
+            let page = render_page(&default_page(headers));
+
+            assert!(
+                page.contains("<article>\n<p>example page body</p>\n</article>\n"),
+                "got {page}"
+            );
+            assert!(!page.contains("<h1>"), "got {page}");
+            assert!(
+                !page.contains(&format!("<link href=\"{DEFAULT_STYLESHEET}\" rel=\"stylesheet\"/>")),
+                "got {page}"
+            );
+            // custom stylesheet does not depend on the default one
+            assert!(
+                page.contains("<link href=\"/styles/post.css\" rel=\"stylesheet\"/>"),
+                "got {page}"
+            );
+        }
+
+        #[test]
+        fn page_can_include_title_and_default_styles() {
+            let headers = PageHeadersBuilder {
+                title: Some("Page"),
+                is_post: Some(false),
+                include_title: Some(true),
+                include_styles: Some(true),
+                ..Default::default()
+            }
+            .build()
+            .unwrap();
+
+            let page = render_page(&default_page(headers));
+
+            assert!(page.contains("<h1>Page</h1>\n<p>example page body</p>\n"), "got {page}");
+            assert!(!page.contains("<article>"), "got {page}");
+            assert!(
+                page.contains(&format!("<link href=\"{DEFAULT_STYLESHEET}\" rel=\"stylesheet\"/>")),
+                "got {page}"
+            );
+        }
+
+        #[test]
+        fn omits_header_and_footer() {
+            let headers = PageHeadersBuilder {
+                title: Some("Page"),
+                is_post: Some(false),
+                include_header: Some(false),
+                include_footer: Some(false),
+                ..Default::default()
+            }
+            .build()
+            .unwrap();
+
+            let page = render_page(&default_page(headers));
+
+            // nothing may be rendered between the wrapper and <main>
+            assert!(
+                page.contains(&format!("<div id=\"{DEFAULT_WRAP_ID}\">\n<main>\n")),
+                "got {page}"
+            );
+            assert!(page.contains("</main>\n</div>\n"), "got {page}");
+        }
+
+        #[test]
+        #[ignore = "header/footer blocks not implemented"]
+        fn includes_header_and_footer_blocks() {
+            let headers = PageHeadersBuilder {
+                title: Some("Page"),
+                is_post: Some(false),
+                include_header: Some(true),
+                include_footer: Some(true),
+                ..Default::default()
+            }
+            .build()
+            .unwrap();
+
+            let page = render_page(&default_page(headers));
+
+            // TODO: assert actual block content once blocks are loaded
+            assert!(!page.contains("<!-- header -->"), "got {page}");
+            assert!(!page.contains("<!-- footer -->"), "got {page}");
         }
     }
 }
