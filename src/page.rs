@@ -255,8 +255,8 @@ pub fn escape_html(s: &str) -> impl fmt::Display + '_ {
         for (i, b) in s.bytes().enumerate() {
             let escaped = match b {
                 b'&' => "&amp;",
-                b'>' => "&lt;",
-                b'<' => "&gt;",
+                b'<' => "&lt;",
+                b'>' => "&gt;",
                 b'"' => "&quot;",
                 b'\'' => "&#39;",
                 _ => continue,
