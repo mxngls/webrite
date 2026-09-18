@@ -299,7 +299,14 @@ pub fn render_page(page: &Page) -> String {
 
     // TODO: Fill in placeholder with actual parsed header block
     let header = if headers.include_header {
-        todo!("block extraction not yet implemented")
+        // TODO: Implement block extraction
+        "<!-- header -->\n"
+    } else {
+        ""
+    };
+
+    let footer = if headers.include_footer {
+        "<!-- footer -->\n"
     } else {
         ""
     };
@@ -322,6 +329,7 @@ pub fn render_page(page: &Page) -> String {
                      <main>\n\
                          {content}\
                      </main>\n\
+                     {footer}\
                  </div>\n\
              </body>\n\
          </html>\n"
