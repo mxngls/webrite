@@ -22,16 +22,6 @@ impl<'a> Page<'a> {
     pub const fn new(path: &'a Path, headers: PageHeaders<'a>, body: &'a str) -> Self {
         Page { path, headers, body }
     }
-
-    pub const fn path(&self) -> &'a Path {
-        self.path
-    }
-    pub const fn headers(&self) -> &PageHeaders<'a> {
-        &self.headers
-    }
-    pub const fn body(&self) -> &'a str {
-        self.body
-    }
 }
 
 #[allow(clippy::struct_excessive_bools)]
