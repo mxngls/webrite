@@ -1056,6 +1056,25 @@ mod tests {
         }
 
         #[test]
+        fn escapes_description() {
+            let headers = PageHeadersBuilder {
+                title: Some("Test"),
+                description: Some("A \"quoted\" description"),
+                is_post: Some(true),
+                ..Default::default()
+            }
+            .build()
+            .unwrap();
+
+            let page = render_page(&default_page(headers));
+
+            assert!(
+                page.contains("<meta name=\"description\" content=\"A &quot;quoted&quot; description\">"),
+                "got {page}"
+            );
+        }
+
+        #[test]
         fn minimal_post() {
             let headers_minimal_post = PageHeadersBuilder {
                 title: Some("Minimal Post"),
