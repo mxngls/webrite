@@ -241,6 +241,8 @@ pub fn parse_header(header_block: &str) -> Result<PageHeaders<'_>, ParsePageHead
     headers_builder.build().map_err(|k| k.at(ln))
 }
 
+// TODO: Instead of the naive escaping approach chosen here we could probably go with something
+// along the lines of: https://github.com/k0kubun/hescape-ruby
 pub fn escape_html(s: &str) -> impl fmt::Display + '_ {
     fmt::from_fn(move |f| {
         let mut last = 0;
@@ -995,7 +997,7 @@ mod tests {
         #[test]
         fn escapes_title() {
             let headers = PageHeadersBuilder {
-                title: Some("Post title escaped in <head> tag"),
+                title: Some("Title with escaped <, >, &, \" and '"),
                 is_post: Some(true),
                 description: Some("Post title escaped"),
                 ..Default::default()
@@ -1006,11 +1008,11 @@ mod tests {
             let page = render_page(&default_page(headers));
 
             assert!(
-                page.contains("<title>Post title escaped in &lt;head&gt; tag</title>"),
+                page.contains("<title>Title with escaped &lt;, &gt;, &amp;, &quot; and &#39;</title>"),
                 "got {page}"
             );
             assert!(
-                page.contains("<h1>Post title escaped in &lt;head&gt; tag</h1>"),
+                page.contains("<h1>Title with escaped &lt;, &gt;, &amp;, &quot; and &#39;</h1>"),
                 "got {page}"
             );
         }
@@ -1019,7 +1021,7 @@ mod tests {
         fn escapes_classes() {
             let headers = PageHeadersBuilder {
                 title: Some("Test"),
-                class: Some("\"class_with_quotes\""),
+                class: Some("class with escaped <, >, &, \" and '"),
                 is_post: Some(false),
                 ..Default::default()
             }
@@ -1030,7 +1032,7 @@ mod tests {
 
             assert!(
                 page.contains(&format!(
-                    "<div id=\"{DEFAULT_WRAP_ID}\" class=\"&quot;class_with_quotes&quot;\">"
+                    "<div id=\"{DEFAULT_WRAP_ID}\" class=\"class with escaped &lt;, &gt;, &amp;, &quot; and &#39;\">"
                 )),
                 "got {page}"
             );
@@ -1040,7 +1042,7 @@ mod tests {
         fn escapes_stylesheet() {
             let headers = PageHeadersBuilder {
                 title: Some("Test"),
-                stylesheet: Some("/styles/\"custom.css\""),
+                stylesheet: Some("/styles/escaped <, >, &, \" and '.css"),
                 is_post: Some(false),
                 ..Default::default()
             }
@@ -1050,7 +1052,9 @@ mod tests {
             let page = render_page(&default_page(headers));
 
             assert!(
-                page.contains("<link href=\"/styles/&quot;custom.css&quot;\" rel=\"stylesheet\"/>"),
+                page.contains(
+                    "<link href=\"/styles/escaped &lt;, &gt;, &amp;, &quot; and &#39;.css\" rel=\"stylesheet\"/>"
+                ),
                 "got {page}"
             );
         }
@@ -1059,7 +1063,7 @@ mod tests {
         fn escapes_description() {
             let headers = PageHeadersBuilder {
                 title: Some("Test"),
-                description: Some("A \"quoted\" description"),
+                description: Some("Description with escaped <, >, &, \" and '"),
                 is_post: Some(true),
                 ..Default::default()
             }
@@ -1069,7 +1073,9 @@ mod tests {
             let page = render_page(&default_page(headers));
 
             assert!(
-                page.contains("<meta name=\"description\" content=\"A &quot;quoted&quot; description\">"),
+                page.contains(
+                    "<meta name=\"description\" content=\"Description with escaped &lt;, &gt;, &amp;, &quot; and &#39;\">"
+                ),
                 "got {page}"
             );
         }
