@@ -1,4 +1,4 @@
-use std::fmt::{self, Write};
+use std::fmt;
 use std::fs;
 use std::io;
 use std::path::Path;
@@ -263,7 +263,7 @@ pub fn escape_html(s: &str) -> impl fmt::Display + '_ {
     })
 }
 
-fn render_head(page: &Page) -> String {
+fn render_head(page: &Page, blocks: &Blocks) -> String {
     let headers = &page.headers;
     let escaped_title = escape_html(headers.title);
 
@@ -282,6 +282,8 @@ fn render_head(page: &Page) -> String {
         String::new()
     };
 
+    let head_block = blocks.head.as_deref().unwrap_or("<!-- head -->\n");
+
     format!(
         "<head>\n\
              <title>{escaped_title}</title>\n\
@@ -289,6 +291,7 @@ fn render_head(page: &Page) -> String {
              {custom_style_link}\
              {style_link}\
              <link href=\"/feed.atom\" type=\"application/atom+xml\" rel=\"alternate\"/>\n\
+             {head_block}\
          </head>\n\
          "
     )
@@ -311,7 +314,7 @@ fn render_content(page: &Page) -> String {
     }
 }
 
-pub fn render_page(page: &Page) -> String {
+pub fn render_page(page: &Page, blocks: &Blocks) -> String {
     let headers = &page.headers;
 
     let class_attr = headers
@@ -319,21 +322,19 @@ pub fn render_page(page: &Page) -> String {
         .map(|c| format!(" class=\"{}\"", escape_html(c)))
         .unwrap_or_default();
 
-    // TODO: Fill in placeholder with actual parsed header block
     let header = if headers.include_header {
-        // TODO: Implement block extraction
-        "<!-- header -->\n"
+        blocks.header.as_deref().unwrap_or("<!-- header -->\n")
     } else {
         ""
     };
 
     let footer = if headers.include_footer {
-        "<!-- footer -->\n"
+        blocks.footer.as_deref().unwrap_or("<!-- footer -->\n")
     } else {
         ""
     };
 
-    let head = render_head(page);
+    let head = render_head(page, blocks);
     let content = render_content(page);
 
     // Indentation is only for the convencience of the reader of this __source code__;
@@ -357,10 +358,108 @@ pub fn render_page(page: &Page) -> String {
     )
 }
 
-pub fn write_page(page: &Page) -> Result<(), Error> {
+pub fn write_page(page: &Page, blocks: &Blocks) -> Result<(), Error> {
     let out_path = Path::new(OUT_DIR).join(page.path);
 
-    fs::write(&out_path, render_page(page)).at_path(&out_path)
+    fs::write(&out_path, render_page(page, blocks)).at_path(&out_path)
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BlockKind {
+    Head,
+    Header,
+    Footer,
+}
+
+impl fmt::Display for BlockKind {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Head => write!(f, "Head"),
+            Self::Header => write!(f, "Header"),
+            Self::Footer => write!(f, "Footer"),
+        }
+    }
+}
+
+impl FromStr for BlockKind {
+    type Err = ReadBlockError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "head.htm" => Ok(Self::Head),
+            "header.htm" => Ok(Self::Header),
+            "footer.htm" => Ok(Self::Footer),
+            _ => Err(ReadBlockError::Unrecognized),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Block(BlockKind, String);
+
+impl Block {
+    fn new(kind: BlockKind, content: String) -> Result<Self, ReadBlockError> {
+        if content.trim().is_empty() {
+            return Err(ReadBlockError::Empty(kind));
+        }
+
+        Ok(Self(kind, content))
+    }
+
+    pub fn from_path(block_path: &Path) -> Result<Self, Error> {
+        let kind = block_path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .ok_or(ReadBlockError::Unrecognized)
+            .and_then(BlockKind::from_str)
+            .at_path(block_path)?;
+
+        let content = fs::read_to_string(block_path).at_path(block_path)?;
+
+        Self::new(kind, content).at_path(block_path)
+    }
+
+    fn into_parts(self) -> (BlockKind, String) {
+        (self.0, self.1)
+    }
+}
+
+#[derive(Debug, Default)]
+pub struct Blocks {
+    head: Option<String>,
+    header: Option<String>,
+    footer: Option<String>,
+}
+
+impl Blocks {
+    pub fn from_dir(dir: &Path) -> Result<Self, Error> {
+        let mut blocks = Self::default();
+
+        for entry in fs::read_dir(dir).at_path(dir)? {
+            let path = entry.at_path(dir)?.path();
+
+            match Block::from_path(&path) {
+                Ok(block) => blocks.insert(block),
+                Err(Error::ReadBlock {
+                    source: ReadBlockError::Unrecognized,
+                    ..
+                }) => (),
+                Err(e) => return Err(e),
+            }
+        }
+
+        Ok(blocks)
+    }
+
+    fn insert(&mut self, block: Block) {
+        let (kind, content) = block.into_parts();
+
+        match kind {
+            BlockKind::Head => self.head = Some(content),
+            BlockKind::Header => self.header = Some(content),
+            BlockKind::Footer => self.footer = Some(content),
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -369,20 +468,24 @@ pub enum Error {
         path: Option<PathBuf>,
         source: io::Error,
     },
+    ParsePageHeader {
+        path: PathBuf,
+        source: ParsePageHeaderError,
+    },
     ReadPageHeader {
         path: PathBuf,
         source: ReadPageError,
     },
-    ParsePageHeader {
+    ReadBlock {
         path: PathBuf,
-        source: ParsePageHeaderError,
+        source: ReadBlockError,
     },
 }
 
 impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::Io { path: Some(path), .. } | Self::ReadPageHeader { path, .. } => {
+            Self::Io { path: Some(path), .. } | Self::ReadPageHeader { path, .. } | Self::ReadBlock { path, .. } => {
                 write!(f, "{}", path.display())
             }
             Self::Io { path: None, .. } => {
@@ -401,6 +504,7 @@ impl std::error::Error for Error {
             Self::Io { source, .. } => Some(source),
             Self::ReadPageHeader { source, .. } => Some(source),
             Self::ParsePageHeader { source, .. } => Some(source),
+            Self::ReadBlock { source, .. } => Some(source),
         }
     }
 }
@@ -452,6 +556,29 @@ impl std::error::Error for ReadPageError {}
 impl WithPath for ReadPageError {
     fn with_path(self, path: PathBuf) -> Error {
         Error::ReadPageHeader { path, source: self }
+    }
+}
+
+#[derive(Debug)]
+pub enum ReadBlockError {
+    Empty(BlockKind),
+    Unrecognized,
+}
+
+impl fmt::Display for ReadBlockError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Empty(kind) => write!(f, "{kind} block is empty"),
+            Self::Unrecognized => write!(f, "expected one of 'head.htm', 'header.htm', 'footer.htm'"),
+        }
+    }
+}
+
+impl std::error::Error for ReadBlockError {}
+
+impl WithPath for ReadBlockError {
+    fn with_path(self, path: PathBuf) -> Error {
+        Error::ReadBlock { path, source: self }
     }
 }
 
@@ -898,12 +1025,108 @@ mod tests {
         }
     }
 
+    mod blocks {
+        use super::*;
+
+        fn block(kind: BlockKind, content: &str) -> Block {
+            Block::new(kind, content.to_owned()).expect("block content to be non-empty")
+        }
+
+        #[test]
+        fn recognizes_block_file_names() {
+            assert_eq!(BlockKind::from_str("head.htm").unwrap(), BlockKind::Head);
+            assert_eq!(BlockKind::from_str("header.htm").unwrap(), BlockKind::Header);
+            assert_eq!(BlockKind::from_str("footer.htm").unwrap(), BlockKind::Footer);
+        }
+
+        #[test]
+        fn rejects_other_file_names() {
+            for name in ["index.htm", "head.html", "Head.htm", "head", ""] {
+                let kind = BlockKind::from_str(name);
+
+                assert!(
+                    matches!(kind, Err(ReadBlockError::Unrecognized)),
+                    "got {kind:?} for {name:?}"
+                );
+            }
+        }
+
+        #[test]
+        fn rejects_blank_block() {
+            let block = Block::new(BlockKind::Head, " \n\t\n".to_owned());
+
+            assert!(
+                matches!(block, Err(ReadBlockError::Empty(BlockKind::Head))),
+                "got {block:?}"
+            );
+        }
+
+        #[test]
+        fn keeps_block_content_verbatim() {
+            let content = "\n<nav>\n  <a href=\"/\">home</a>\n</nav>\n";
+
+            let (kind, kept) = block(BlockKind::Header, content).into_parts();
+
+            assert_eq!(kind, BlockKind::Header);
+            assert_eq!(kept, content);
+        }
+
+        #[test]
+        fn places_blocks_by_kind() {
+            let mut blocks = Blocks::default();
+
+            blocks.insert(block(BlockKind::Head, "<meta charset=\"utf-8\">"));
+            blocks.insert(block(BlockKind::Header, "<nav>nav</nav>"));
+            blocks.insert(block(BlockKind::Footer, "<footer>footer</footer>"));
+
+            assert_eq!(blocks.head.as_deref(), Some("<meta charset=\"utf-8\">"));
+            assert_eq!(blocks.header.as_deref(), Some("<nav>nav</nav>"));
+            assert_eq!(blocks.footer.as_deref(), Some("<footer>footer</footer>"));
+        }
+
+        #[test]
+        fn can_override_block() {
+            let mut blocks = Blocks::default();
+
+            blocks.insert(block(BlockKind::Header, "<nav>first</nav>"));
+            blocks.insert(block(BlockKind::Header, "<nav>second</nav>"));
+
+            assert_eq!(blocks.header.as_deref(), Some("<nav>second</nav>"));
+            assert_eq!(blocks.head, None);
+            assert_eq!(blocks.footer, None);
+        }
+    }
+
     mod render_page {
         use super::*;
         use std::env;
+        use std::fmt::Write;
 
         fn default_page(headers: PageHeaders) -> Page {
             Page::new(Path::new("full.html"), headers, "<p>example page body</p>")
+        }
+
+        fn render(page: &Page) -> String {
+            render_page(page, &Blocks::default())
+        }
+
+        fn render_with(page: &Page, blocks: impl IntoIterator<Item = (BlockKind, &'static str)>) -> String {
+            let mut collected = Blocks::default();
+            for (kind, content) in blocks {
+                collected.insert(Block::new(kind, content.to_owned()).expect("block content to be non-empty"));
+            }
+
+            render_page(page, &collected)
+        }
+
+        fn page_headers() -> PageHeaders<'static> {
+            PageHeadersBuilder {
+                title: Some("Page"),
+                is_post: Some(false),
+                ..Default::default()
+            }
+            .build()
+            .unwrap()
         }
 
         fn headers_full() -> PageHeaders<'static> {
@@ -976,7 +1199,7 @@ mod tests {
 
         #[test]
         fn full_page() {
-            compare_page_snapshot("full.html", &render_page(&default_page(headers_full())));
+            compare_page_snapshot("full.html", &render(&default_page(headers_full())));
         }
 
         #[test]
@@ -991,7 +1214,7 @@ mod tests {
             .build()
             .unwrap();
 
-            compare_page_snapshot("minimal.html", &render_page(&default_page(headers_minimal)));
+            compare_page_snapshot("minimal.html", &render(&default_page(headers_minimal)));
         }
 
         #[test]
@@ -1005,7 +1228,7 @@ mod tests {
             .build()
             .unwrap();
 
-            let page = render_page(&default_page(headers));
+            let page = render(&default_page(headers));
 
             assert!(
                 page.contains("<title>Title with escaped &lt;, &gt;, &amp;, &quot; and &#39;</title>"),
@@ -1028,7 +1251,7 @@ mod tests {
             .build()
             .unwrap();
 
-            let page = render_page(&default_page(headers));
+            let page = render(&default_page(headers));
 
             assert!(
                 page.contains(&format!(
@@ -1049,7 +1272,7 @@ mod tests {
             .build()
             .unwrap();
 
-            let page = render_page(&default_page(headers));
+            let page = render(&default_page(headers));
 
             assert!(
                 page.contains(
@@ -1070,7 +1293,7 @@ mod tests {
             .build()
             .unwrap();
 
-            let page = render_page(&default_page(headers));
+            let page = render(&default_page(headers));
 
             assert!(
                 page.contains(
@@ -1091,7 +1314,7 @@ mod tests {
             .build()
             .unwrap();
 
-            compare_page_snapshot("minimal_post.html", &render_page(&default_page(headers_minimal_post)));
+            compare_page_snapshot("minimal_post.html", &render(&default_page(headers_minimal_post)));
         }
 
         #[test]
@@ -1108,7 +1331,7 @@ mod tests {
             .build()
             .unwrap();
 
-            let page = render_page(&default_page(headers));
+            let page = render(&default_page(headers));
 
             assert!(
                 page.contains("<article>\n<p>example page body</p>\n</article>\n"),
@@ -1138,7 +1361,7 @@ mod tests {
             .build()
             .unwrap();
 
-            let page = render_page(&default_page(headers));
+            let page = render(&default_page(headers));
 
             assert!(page.contains("<h1>Page</h1>\n<p>example page body</p>\n"), "got {page}");
             assert!(!page.contains("<article>"), "got {page}");
@@ -1160,7 +1383,7 @@ mod tests {
             .build()
             .unwrap();
 
-            let page = render_page(&default_page(headers));
+            let page = render(&default_page(headers));
 
             // nothing may be rendered between the wrapper and <main>
             assert!(
@@ -1171,7 +1394,6 @@ mod tests {
         }
 
         #[test]
-        #[ignore = "header/footer blocks not implemented"]
         fn includes_header_and_footer_blocks() {
             let headers = PageHeadersBuilder {
                 title: Some("Page"),
@@ -1183,11 +1405,95 @@ mod tests {
             .build()
             .unwrap();
 
-            let page = render_page(&default_page(headers));
+            let page = render_with(
+                &default_page(headers),
+                [
+                    (BlockKind::Header, "<nav>site nav</nav>\n"),
+                    (BlockKind::Footer, "<footer>site footer</footer>\n"),
+                ],
+            );
 
-            // TODO: assert actual block content once blocks are loaded
-            assert!(!page.contains("<!-- header -->"), "got {page}");
-            assert!(!page.contains("<!-- footer -->"), "got {page}");
+            assert!(
+                page.contains(&format!(
+                    "<div id=\"{DEFAULT_WRAP_ID}\">\n<nav>site nav</nav>\n<main>\n"
+                )),
+                "got {page}"
+            );
+            assert!(
+                page.contains("</main>\n<footer>site footer</footer>\n</div>\n"),
+                "got {page}"
+            );
+        }
+
+        #[test]
+        fn footer_block_does_not_depend_on_the_header() {
+            let headers = PageHeadersBuilder {
+                title: Some("Page"),
+                is_post: Some(false),
+                include_header: Some(false),
+                include_footer: Some(true),
+                ..Default::default()
+            }
+            .build()
+            .unwrap();
+
+            let page = render_with(
+                &default_page(headers),
+                [
+                    (BlockKind::Header, "<nav>site nav</nav>\n"),
+                    (BlockKind::Footer, "<footer>site footer</footer>\n"),
+                ],
+            );
+
+            assert!(!page.contains("<nav>site nav</nav>"), "got {page}");
+            assert!(
+                page.contains("</main>\n<footer>site footer</footer>\n</div>\n"),
+                "got {page}"
+            );
+        }
+
+        #[test]
+        fn head_block_extends_the_defaults() {
+            let page = render_with(
+                &default_page(page_headers()),
+                [(
+                    BlockKind::Head,
+                    "<meta name=\"viewport\" content=\"width=device-width\">\n",
+                )],
+            );
+
+            // the defaults survive ...
+            assert!(page.contains("<title>Page</title>"), "got {page}");
+            assert!(
+                page.contains("<link href=\"/feed.atom\" type=\"application/atom+xml\" rel=\"alternate\"/>"),
+                "got {page}"
+            );
+            // ... and the block is added to them, verbatim
+            assert!(
+                page.contains("<meta name=\"viewport\" content=\"width=device-width\">"),
+                "got {page}"
+            );
+        }
+
+        #[test]
+        fn head_block_can_override_the_defaults() {
+            // the block closes the head, so a tag it repeats takes precedence
+            let page = render_with(
+                &default_page(page_headers()),
+                [(
+                    BlockKind::Head,
+                    "<link href=\"/styles/override.css\" rel=\"stylesheet\"/>\n",
+                )],
+            );
+
+            assert!(
+                page.contains(
+                    "<link href=\"/feed.atom\" type=\"application/atom+xml\" rel=\"alternate\"/>\n\
+                     <link href=\"/styles/override.css\" rel=\"stylesheet\"/>\n\
+                     </head>"
+                ),
+                "got {page}"
+            );
         }
     }
 }

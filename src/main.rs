@@ -5,10 +5,10 @@ use std::{fs, io, process};
 mod page;
 
 use crate::page::{
-    BLOCK_DIR, DRAFT_DIR, Error, IN_DIR, OUT_DIR, Page, PathContext, parse_header, split_page, write_page,
+    BLOCK_DIR, Blocks, DRAFT_DIR, Error, IN_DIR, OUT_DIR, Page, PathContext, parse_header, split_page, write_page,
 };
 
-fn process_file(input_path: &Path) -> Result<(), Error> {
+fn process_file(input_path: &Path, blocks: &Blocks) -> Result<(), Error> {
     let mut reader = io::BufReader::new(fs::File::open(input_path).at_path(input_path)?);
     let mut page_string = String::new();
     reader.read_to_string(&mut page_string).at_path(input_path)?;
@@ -20,13 +20,15 @@ fn process_file(input_path: &Path) -> Result<(), Error> {
         .strip_prefix(IN_DIR)
         .expect("file paths descend from the input directory");
 
-    write_page(&Page::new(rel_path, headers, body))
+    write_page(&Page::new(rel_path, headers, body), blocks)
 }
 
 fn process_dir(input_dir: &Path) -> Result<(), Error> {
-    let mut stack = vec![input_dir.to_path_buf()];
+    let blocks = Blocks::from_dir(&input_dir.join(BLOCK_DIR))?;
 
-    while let Some(dir) = stack.pop() {
+    let mut dir_stack = vec![input_dir.to_path_buf()];
+
+    while let Some(dir) = dir_stack.pop() {
         for entry in fs::read_dir(&dir).at_path(&dir)? {
             let entry = entry.at_path(&dir)?;
             let path = entry.path();
@@ -43,13 +45,13 @@ fn process_dir(input_dir: &Path) -> Result<(), Error> {
 
             if typ.is_dir() {
                 let dir_name = entry.file_name();
-                if dir_name == BLOCK_DIR || dir_name == DRAFT_DIR {
+                if dir_name == DRAFT_DIR || dir_name == BLOCK_DIR {
                     continue;
                 }
                 fs::create_dir_all(&out_path).at_path(&out_path)?;
-                stack.push(path);
+                dir_stack.push(path);
             } else if path.extension().is_some_and(|ext| ext == "htm") {
-                process_file(&path)?;
+                process_file(&path, &blocks)?;
             } else {
                 fs::copy(&path, &out_path).at_path(&out_path)?;
             }
