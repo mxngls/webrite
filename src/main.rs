@@ -1,6 +1,5 @@
-use std::io::Read;
 use std::path::Path;
-use std::{fs, io, process};
+use std::{fs, process};
 
 mod page;
 
@@ -8,19 +7,21 @@ use crate::page::{
     BLOCK_DIR, Blocks, DRAFT_DIR, Error, IN_DIR, OUT_DIR, Page, PathContext, parse_header, split_page, write_page,
 };
 
-fn process_file(input_path: &Path, blocks: &Blocks) -> Result<(), Error> {
-    let mut reader = io::BufReader::new(fs::File::open(input_path).at_path(input_path)?);
-    let mut page_string = String::new();
-    reader.read_to_string(&mut page_string).at_path(input_path)?;
+fn process_file(input_path: &Path, blocks: &Blocks) -> Result<Page, Error> {
+    let page_str = fs::read_to_string(input_path).at_path(input_path)?;
 
-    let (headers, body) = split_page(&page_string).at_path(input_path)?;
+    let (headers, body) = split_page(&page_str).at_path(input_path)?;
     let headers = parse_header(headers).at_path(input_path)?;
 
     let rel_path = input_path
         .strip_prefix(IN_DIR)
         .expect("file paths descend from the input directory");
 
-    write_page(&Page::new(rel_path, headers, body), blocks)
+    let page = Page::new(rel_path.to_path_buf(), headers, body.to_string());
+
+    write_page(&page, blocks)?;
+
+    Ok(page)
 }
 
 fn process_dir(input_dir: &Path) -> Result<(), Error> {
@@ -41,19 +42,19 @@ fn process_dir(input_dir: &Path) -> Result<(), Error> {
             let rel_path = path
                 .strip_prefix(input_dir)
                 .expect("paths descend from the input directory");
-            let out_path = Path::new(OUT_DIR).join(rel_path);
+            let out_dir = Path::new(OUT_DIR).join(rel_path);
 
             if typ.is_dir() {
                 let dir_name = entry.file_name();
                 if dir_name == DRAFT_DIR || dir_name == BLOCK_DIR {
                     continue;
                 }
-                fs::create_dir_all(&out_path).at_path(&out_path)?;
+                fs::create_dir_all(&out_dir).at_path(&out_dir)?;
                 dir_stack.push(path);
             } else if path.extension().is_some_and(|ext| ext == "htm") {
                 process_file(&path, &blocks)?;
             } else {
-                fs::copy(&path, &out_path).at_path(&out_path)?;
+                fs::copy(&path, &out_dir).at_path(&out_dir)?;
             }
         }
     }

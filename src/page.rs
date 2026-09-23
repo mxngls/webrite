@@ -14,25 +14,25 @@ pub static DEFAULT_STYLESHEET: &str = "/style.css";
 pub static DEFAULT_WRAP_ID: &str = "wrap";
 
 #[derive(Debug)]
-pub struct Page<'a> {
-    path: &'a Path,
-    headers: PageHeaders<'a>,
-    body: &'a str,
+pub struct Page {
+    path: PathBuf,
+    headers: PageHeaders,
+    body: String,
 }
 
-impl<'a> Page<'a> {
-    pub const fn new(path: &'a Path, headers: PageHeaders<'a>, body: &'a str) -> Self {
-        Page { path, headers, body }
+impl Page {
+    pub const fn new(path: PathBuf, headers: PageHeaders, body: String) -> Self {
+        Self { path, headers, body }
     }
 }
 
 #[allow(clippy::struct_excessive_bools)]
 #[derive(Debug)]
-pub struct PageHeaders<'a> {
-    title: &'a str,
-    description: Option<&'a str>,
-    class: Option<&'a str>,
-    stylesheet: Option<&'a str>,
+pub struct PageHeaders {
+    title: String,
+    description: Option<String>,
+    css_classes: Option<String>,
+    css_stylesheet_path: Option<String>,
     is_post: bool,
     include_header: bool,
     include_footer: bool,
@@ -89,27 +89,28 @@ impl<'a> PageHeadersBuilder<'a> {
         Ok(())
     }
 
-    fn build(self) -> Result<PageHeaders<'a>, ParsePageHeaderErrorKind> {
+    fn build(self) -> Result<PageHeaders, ParsePageHeaderErrorKind> {
         let is_post = self.is_post.unwrap_or(true);
-        let description =
-            if is_post {
-                Some(self.description.ok_or_else(|| {
-                    ParsePageHeaderErrorKind::MissingRequiredHeader(HeaderKey::Description.to_string())
-                })?)
-            } else {
+        let description = if is_post {
+            Some(
                 self.description
-            };
+                    .ok_or_else(|| ParsePageHeaderErrorKind::MissingRequiredHeader(HeaderKey::Description.to_string()))?
+                    .to_owned(),
+            )
+        } else {
+            self.description.map(str::to_owned)
+        };
         let title = self
             .title
             .ok_or_else(|| ParsePageHeaderErrorKind::MissingRequiredHeader(HeaderKey::Title.to_string()))?;
 
         Ok(PageHeaders {
             // required
-            title,
+            title: title.to_string(),
             description,
 
-            class: self.class,
-            stylesheet: self.stylesheet,
+            css_classes: self.class.map(str::to_owned),
+            css_stylesheet_path: self.stylesheet.map(str::to_owned),
             include_header: self.include_header.unwrap_or(true),
             include_footer: self.include_footer.unwrap_or(true),
 
@@ -215,7 +216,7 @@ pub fn split_page(page_str: &str) -> Result<(&str, &str), ReadPageError> {
     Ok((header, body))
 }
 
-pub fn parse_header(header_block: &str) -> Result<PageHeaders<'_>, ParsePageHeaderError> {
+pub fn parse_header(header_block: &str) -> Result<PageHeaders, ParsePageHeaderError> {
     let mut headers_builder = PageHeadersBuilder::default();
     let mut ln = 0;
     for (i, line) in header_block.lines().enumerate() {
@@ -265,14 +266,15 @@ pub fn escape_html(s: &str) -> impl fmt::Display + '_ {
 
 fn render_head(page: &Page, blocks: &Blocks) -> String {
     let headers = &page.headers;
-    let escaped_title = escape_html(headers.title);
+    let escaped_title = escape_html(&headers.title);
 
     let description_meta = headers
         .description
+        .as_ref()
         .map(|d| format!("<meta name=\"description\" content=\"{}\">\n", escape_html(d)))
         .unwrap_or_default();
 
-    let custom_style_link = headers.stylesheet.map_or_else(String::new, |s| {
+    let custom_style_link = headers.css_stylesheet_path.as_ref().map_or_else(String::new, |s| {
         format!("<link href=\"{}\" rel=\"stylesheet\"/>\n", escape_html(s))
     });
 
@@ -298,9 +300,9 @@ fn render_head(page: &Page, blocks: &Blocks) -> String {
 }
 
 fn render_content(page: &Page) -> String {
-    let body = page.body;
+    let body = &page.body;
     let heading = if page.headers.include_title {
-        format!("<h1>{}</h1>\n", escape_html(page.headers.title))
+        format!("<h1>{}</h1>\n", escape_html(&page.headers.title))
     } else {
         String::new()
     };
@@ -318,7 +320,8 @@ pub fn render_page(page: &Page, blocks: &Blocks) -> String {
     let headers = &page.headers;
 
     let class_attr = headers
-        .class
+        .css_classes
+        .as_ref()
         .map(|c| format!(" class=\"{}\"", escape_html(c)))
         .unwrap_or_default();
 
@@ -359,10 +362,16 @@ pub fn render_page(page: &Page, blocks: &Blocks) -> String {
 }
 
 pub fn write_page(page: &Page, blocks: &Blocks) -> Result<(), Error> {
-    let out_path = Path::new(OUT_DIR).join(page.path);
+    let out_path = Path::new(OUT_DIR).join(&page.path);
 
     fs::write(&out_path, render_page(page, blocks)).at_path(&out_path)
 }
+
+// pub fn render_feed(page: &Page) -> Result<(), Error> -> {
+// }
+//
+// pub fn write_feed(page: &Page) -> Result<(), Error> -> {
+// }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BlockKind {
@@ -785,10 +794,10 @@ mod tests {
 
             assert_eq!(headers.title, "Example", "got {:?}", headers.title);
             assert_eq!(
-                headers.description.unwrap(),
+                headers.description.as_ref().unwrap(),
                 "example post with separator and newlines",
                 "got {:?}",
-                headers.description.unwrap()
+                headers.description.as_ref().unwrap()
             );
         }
 
@@ -840,7 +849,7 @@ mod tests {
             let headers = parse_header(header_str).unwrap();
 
             assert_eq!(headers.title, "Example");
-            assert_eq!(headers.description, Some("example post with blank lines"));
+            assert_eq!(headers.description, Some("example post with blank lines".to_string()));
         }
 
         #[test]
@@ -850,7 +859,7 @@ mod tests {
             let headers = parse_header(header_str).unwrap();
 
             assert_eq!(headers.title, "Example Page");
-            assert_eq!(headers.description, Some("example post with padded fields"));
+            assert_eq!(headers.description, Some("example post with padded fields".to_string()));
         }
 
         #[test]
@@ -863,7 +872,10 @@ mod tests {
             let headers = parse_header(header_str).unwrap();
 
             assert_eq!(headers.title, "Example: A Post");
-            assert_eq!(headers.description, Some("see https://example.com for details"));
+            assert_eq!(
+                headers.description,
+                Some("see https://example.com for details".to_string())
+            );
         }
 
         #[test]
@@ -958,8 +970,12 @@ mod tests {
 
             let headers = parse_header(header_str).unwrap();
 
-            assert_eq!(headers.class, None, "got {:?}", headers.class);
-            assert_eq!(headers.stylesheet, None, "got {:?}", headers.stylesheet);
+            assert_eq!(headers.css_classes, None, "got {:?}", headers.css_classes);
+            assert_eq!(
+                headers.css_stylesheet_path, None,
+                "got {:?}",
+                headers.css_stylesheet_path
+            );
 
             // boolean fields
             assert!(headers.is_post, "got {:?}", headers.is_post);
@@ -987,8 +1003,8 @@ mod tests {
 
             let headers = parse_header(header_str).unwrap();
 
-            assert_eq!(headers.class, Some("wide"));
-            assert_eq!(headers.stylesheet, Some("/style/page.css"));
+            assert_eq!(headers.css_classes, Some("wide".to_string()));
+            assert_eq!(headers.css_stylesheet_path, Some("/style/page.css".to_string()));
 
             assert!(!headers.is_post, "got {:?}", headers.is_post);
 
@@ -1103,7 +1119,11 @@ mod tests {
         use std::fmt::Write;
 
         fn default_page(headers: PageHeaders) -> Page {
-            Page::new(Path::new("full.html"), headers, "<p>example page body</p>")
+            Page::new(
+                Path::new("full.html").to_owned(),
+                headers,
+                "<p>example page body</p>".to_string(),
+            )
         }
 
         fn render(page: &Page) -> String {
@@ -1119,7 +1139,7 @@ mod tests {
             render_page(page, &collected)
         }
 
-        fn page_headers() -> PageHeaders<'static> {
+        fn page_headers() -> PageHeaders {
             PageHeadersBuilder {
                 title: Some("Page"),
                 is_post: Some(false),
@@ -1129,12 +1149,12 @@ mod tests {
             .unwrap()
         }
 
-        fn headers_full() -> PageHeaders<'static> {
+        fn headers_full() -> PageHeaders {
             PageHeaders {
-                title: "Example Post",
-                description: Some("An example post"),
-                class: Some("post"),
-                stylesheet: Some("/styles/example.css"),
+                title: "Example Post".to_string(),
+                description: Some("An example post".to_string()),
+                css_classes: Some("post".to_string()),
+                css_stylesheet_path: Some("/styles/example.css".to_string()),
                 is_post: true,
                 include_header: true,
                 include_footer: true,
