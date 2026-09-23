@@ -32,7 +32,7 @@ pub struct PageHeaders {
     title: String,
     description: Option<String>,
     css_classes: Option<String>,
-    css_stylesheet_path: Option<String>,
+    css_stylesheet: Option<String>,
     is_post: bool,
     include_header: bool,
     include_footer: bool,
@@ -45,8 +45,8 @@ pub struct PageHeaders {
 struct PageHeadersBuilder<'a> {
     title: Option<&'a str>,
     description: Option<&'a str>,
-    class: Option<&'a str>,
-    stylesheet: Option<&'a str>,
+    css_classes: Option<&'a str>,
+    css_stylesheet: Option<&'a str>,
     is_post: Option<bool>,
     include_header: Option<bool>,
     include_footer: Option<bool>,
@@ -76,8 +76,8 @@ impl<'a> PageHeadersBuilder<'a> {
             // string headers
             HeaderKey::Title => Self::set_once(&mut self.title, key, val)?,
             HeaderKey::Description => Self::set_once(&mut self.description, key, val)?,
-            HeaderKey::Class => Self::set_once(&mut self.class, key, val)?,
-            HeaderKey::Stylesheet => Self::set_once(&mut self.stylesheet, key, val)?,
+            HeaderKey::CSSClasses => Self::set_once(&mut self.css_classes, key, val)?,
+            HeaderKey::CSSStylesheet => Self::set_once(&mut self.css_stylesheet, key, val)?,
 
             // boolean headers
             HeaderKey::IsPost => Self::set_once(&mut self.is_post, key, Self::parse_bool(val)?)?,
@@ -109,8 +109,8 @@ impl<'a> PageHeadersBuilder<'a> {
             title: title.to_string(),
             description,
 
-            css_classes: self.class.map(str::to_owned),
-            css_stylesheet_path: self.stylesheet.map(str::to_owned),
+            css_classes: self.css_classes.map(str::to_owned),
+            css_stylesheet: self.css_stylesheet.map(str::to_owned),
             include_header: self.include_header.unwrap_or(true),
             include_footer: self.include_footer.unwrap_or(true),
 
@@ -125,8 +125,8 @@ impl<'a> PageHeadersBuilder<'a> {
 enum HeaderKey {
     Title,
     Description,
-    Class,
-    Stylesheet,
+    CSSClasses,
+    CSSStylesheet,
     IsPost,
     IncludeHeader,
     IncludeFooter,
@@ -139,8 +139,8 @@ impl HeaderKey {
         match self {
             Self::Title => "title",
             Self::Description => "description",
-            Self::Class => "class",
-            Self::Stylesheet => "stylesheet",
+            Self::CSSClasses => "css_classes",
+            Self::CSSStylesheet => "css_stylesheet",
             Self::IsPost => "is_post",
             Self::IncludeHeader => "include_header",
             Self::IncludeFooter => "include_footer",
@@ -156,8 +156,8 @@ impl FromStr for HeaderKey {
         Ok(match s {
             "title" => Self::Title,
             "description" => Self::Description,
-            "class" => Self::Class,
-            "stylesheet" => Self::Stylesheet,
+            "css_classes" => Self::CSSClasses,
+            "css_stylesheet" => Self::CSSStylesheet,
             "is_post" => Self::IsPost,
             "include_header" => Self::IncludeHeader,
             "include_footer" => Self::IncludeFooter,
@@ -274,7 +274,7 @@ fn render_head(page: &Page, blocks: &Blocks) -> String {
         .map(|d| format!("<meta name=\"description\" content=\"{}\">\n", escape_html(d)))
         .unwrap_or_default();
 
-    let custom_style_link = headers.css_stylesheet_path.as_ref().map_or_else(String::new, |s| {
+    let custom_style_link = headers.css_stylesheet.as_ref().map_or_else(String::new, |s| {
         format!("<link href=\"{}\" rel=\"stylesheet\"/>\n", escape_html(s))
     });
 
@@ -971,11 +971,7 @@ mod tests {
             let headers = parse_header(header_str).unwrap();
 
             assert_eq!(headers.css_classes, None, "got {:?}", headers.css_classes);
-            assert_eq!(
-                headers.css_stylesheet_path, None,
-                "got {:?}",
-                headers.css_stylesheet_path
-            );
+            assert_eq!(headers.css_stylesheet, None, "got {:?}", headers.css_stylesheet);
 
             // boolean fields
             assert!(headers.is_post, "got {:?}", headers.is_post);
@@ -991,8 +987,8 @@ mod tests {
                 title: Example
                 description: example page with every header set explicitly
 
-                class: wide
-                stylesheet: /style/page.css
+                css_classes: wide
+                css_stylesheet: /style/page.css
 
                 is_post: no
                 include_header: no
@@ -1004,7 +1000,7 @@ mod tests {
             let headers = parse_header(header_str).unwrap();
 
             assert_eq!(headers.css_classes, Some("wide".to_string()));
-            assert_eq!(headers.css_stylesheet_path, Some("/style/page.css".to_string()));
+            assert_eq!(headers.css_stylesheet, Some("/style/page.css".to_string()));
 
             assert!(!headers.is_post, "got {:?}", headers.is_post);
 
@@ -1154,7 +1150,7 @@ mod tests {
                 title: "Example Post".to_string(),
                 description: Some("An example post".to_string()),
                 css_classes: Some("post".to_string()),
-                css_stylesheet_path: Some("/styles/example.css".to_string()),
+                css_stylesheet: Some("/styles/example.css".to_string()),
                 is_post: true,
                 include_header: true,
                 include_footer: true,
@@ -1264,7 +1260,7 @@ mod tests {
         fn escapes_classes() {
             let headers = PageHeadersBuilder {
                 title: Some("Test"),
-                class: Some("class with escaped <, >, &, \" and '"),
+                css_classes: Some("class with escaped <, >, &, \" and '"),
                 is_post: Some(false),
                 ..Default::default()
             }
@@ -1285,7 +1281,7 @@ mod tests {
         fn escapes_stylesheet() {
             let headers = PageHeadersBuilder {
                 title: Some("Test"),
-                stylesheet: Some("/styles/escaped <, >, &, \" and '.css"),
+                css_stylesheet: Some("/styles/escaped <, >, &, \" and '.css"),
                 is_post: Some(false),
                 ..Default::default()
             }
@@ -1342,7 +1338,7 @@ mod tests {
             let headers = PageHeadersBuilder {
                 title: Some("Post"),
                 description: Some("Post without title and default styles"),
-                stylesheet: Some("/styles/post.css"),
+                css_stylesheet: Some("/styles/post.css"),
                 is_post: Some(true),
                 include_title: Some(false),
                 include_styles: Some(false),
