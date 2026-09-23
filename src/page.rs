@@ -31,8 +31,12 @@ impl Page {
 pub struct PageHeaders {
     title: String,
     description: Option<String>,
+
+    created_at: Option<String>,
+
     css_classes: Option<String>,
     css_stylesheet: Option<String>,
+
     is_post: bool,
     include_header: bool,
     include_footer: bool,
@@ -45,8 +49,12 @@ pub struct PageHeaders {
 struct PageHeadersBuilder<'a> {
     title: Option<&'a str>,
     description: Option<&'a str>,
+
+    created_at: Option<&'a str>,
+
     css_classes: Option<&'a str>,
     css_stylesheet: Option<&'a str>,
+
     is_post: Option<bool>,
     include_header: Option<bool>,
     include_footer: Option<bool>,
@@ -76,6 +84,7 @@ impl<'a> PageHeadersBuilder<'a> {
             // string headers
             HeaderKey::Title => Self::set_once(&mut self.title, key, val)?,
             HeaderKey::Description => Self::set_once(&mut self.description, key, val)?,
+            HeaderKey::CreatedAt => Self::set_once(&mut self.created_at, key, val)?,
             HeaderKey::CSSClasses => Self::set_once(&mut self.css_classes, key, val)?,
             HeaderKey::CSSStylesheet => Self::set_once(&mut self.css_stylesheet, key, val)?,
 
@@ -103,11 +112,22 @@ impl<'a> PageHeadersBuilder<'a> {
         let title = self
             .title
             .ok_or_else(|| ParsePageHeaderErrorKind::MissingRequiredHeader(HeaderKey::Title.to_string()))?;
+        let created_at = if is_post {
+            Some(
+                self.created_at
+                    .ok_or_else(|| ParsePageHeaderErrorKind::MissingRequiredHeader(HeaderKey::CreatedAt.to_string()))?
+                    .to_owned(),
+            )
+        } else {
+            self.created_at.map(str::to_owned)
+        };
 
         Ok(PageHeaders {
             // required
             title: title.to_string(),
             description,
+
+            created_at,
 
             css_classes: self.css_classes.map(str::to_owned),
             css_stylesheet: self.css_stylesheet.map(str::to_owned),
@@ -125,6 +145,7 @@ impl<'a> PageHeadersBuilder<'a> {
 enum HeaderKey {
     Title,
     Description,
+    CreatedAt,
     CSSClasses,
     CSSStylesheet,
     IsPost,
@@ -139,8 +160,12 @@ impl HeaderKey {
         match self {
             Self::Title => "title",
             Self::Description => "description",
+
+            Self::CreatedAt => "created_at",
+
             Self::CSSClasses => "css_classes",
             Self::CSSStylesheet => "css_stylesheet",
+
             Self::IsPost => "is_post",
             Self::IncludeHeader => "include_header",
             Self::IncludeFooter => "include_footer",
@@ -156,8 +181,12 @@ impl FromStr for HeaderKey {
         Ok(match s {
             "title" => Self::Title,
             "description" => Self::Description,
+
+            "created_at" => Self::CreatedAt,
+
             "css_classes" => Self::CSSClasses,
             "css_stylesheet" => Self::CSSStylesheet,
+
             "is_post" => Self::IsPost,
             "include_header" => Self::IncludeHeader,
             "include_footer" => Self::IncludeFooter,
@@ -788,6 +817,7 @@ mod tests {
             let header_str = indoc! {"
                 title: Example
                 description: example post with separator and newlines
+                created_at: 2026-06-26
             "};
 
             let headers = parse_header(header_str).unwrap();
@@ -798,6 +828,12 @@ mod tests {
                 "example post with separator and newlines",
                 "got {:?}",
                 headers.description.as_ref().unwrap()
+            );
+            assert_eq!(
+                headers.created_at,
+                Some("2026-06-26".to_string()),
+                "got {:?}",
+                headers.created_at
             );
         }
 
@@ -843,8 +879,31 @@ mod tests {
         }
 
         #[test]
+        fn rejects_missing_creation_date_for_post() {
+            let header_str = indoc! {"
+                title: Example
+                description: Example Post
+                is_post: yes
+            "};
+
+            let headers = parse_header(header_str);
+
+            assert!(
+                matches!(
+                    &headers,
+                    Err(ParsePageHeaderError {
+                        line: 3,
+                        kind: ParsePageHeaderErrorKind::MissingRequiredHeader(k),
+                    }) if k == "created_at"
+                ),
+                "got {headers:?}"
+            );
+        }
+
+        #[test]
         fn skips_blank_lines() {
-            let header_str = "title: Example\n\n \t \ndescription: example post with blank lines\n";
+            let header_str =
+                "title: Example\n\n \t \ndescription: example post with blank lines\ncreated_at: 2026-06-26\n";
 
             let headers = parse_header(header_str).unwrap();
 
@@ -854,12 +913,15 @@ mod tests {
 
         #[test]
         fn trims_whitespace_around_keys_and_values() {
-            let header_str = "  title  :   Example Page  \n\tdescription\t:\texample post with padded fields\t\n";
+            let header_str = "  title  :   Example Page  \n\
+                              \tdescription\t:\texample post with padded fields\t\n\
+                              \t created_at \t:\t2026-06-26 \t\n";
 
             let headers = parse_header(header_str).unwrap();
 
             assert_eq!(headers.title, "Example Page");
             assert_eq!(headers.description, Some("example post with padded fields".to_string()));
+            assert_eq!(headers.created_at, Some("2026-06-26".to_string()));
         }
 
         #[test]
@@ -867,6 +929,7 @@ mod tests {
             let header_str = indoc! {"
                   title: Example: A Post
                   description: see https://example.com for details
+                  created_at: 2026-06-26
                   "};
 
             let headers = parse_header(header_str).unwrap();
@@ -966,6 +1029,7 @@ mod tests {
             let header_str = indoc! {"
                 title: Example
                 description: example post with separator and newlines
+                created_at: 2026-06-26
             "};
 
             let headers = parse_header(header_str).unwrap();
@@ -987,6 +1051,8 @@ mod tests {
                 title: Example
                 description: example page with every header set explicitly
 
+                created_at: 2026-06-26
+
                 css_classes: wide
                 css_stylesheet: /style/page.css
 
@@ -998,6 +1064,8 @@ mod tests {
             "};
 
             let headers = parse_header(header_str).unwrap();
+
+            assert_eq!(headers.created_at, Some("2026-06-26".to_string()));
 
             assert_eq!(headers.css_classes, Some("wide".to_string()));
             assert_eq!(headers.css_stylesheet, Some("/style/page.css".to_string()));
@@ -1018,6 +1086,7 @@ mod tests {
             let header_str = indoc! {"
                   title: Example
                   description: example post with assorted boolean spellings
+                  created_at: 2026-06-26
 
                   is_post: YES
                   include_header: y
@@ -1149,6 +1218,7 @@ mod tests {
             PageHeaders {
                 title: "Example Post".to_string(),
                 description: Some("An example post".to_string()),
+                created_at: Some("2026-06-26".to_string()),
                 css_classes: Some("post".to_string()),
                 css_stylesheet: Some("/styles/example.css".to_string()),
                 is_post: true,
@@ -1239,6 +1309,7 @@ mod tests {
                 title: Some("Title with escaped <, >, &, \" and '"),
                 is_post: Some(true),
                 description: Some("Post title escaped"),
+                created_at: Some("2026-06-26"),
                 ..Default::default()
             }
             .build()
@@ -1304,6 +1375,7 @@ mod tests {
                 title: Some("Test"),
                 description: Some("Description with escaped <, >, &, \" and '"),
                 is_post: Some(true),
+                created_at: Some("2026-06-26"),
                 ..Default::default()
             }
             .build()
@@ -1325,6 +1397,7 @@ mod tests {
                 title: Some("Minimal Post"),
                 description: Some("Minimal post with description"),
                 is_post: Some(true),
+                created_at: Some("2026-06-26"),
                 ..Default::default()
             }
             .build()
@@ -1340,6 +1413,7 @@ mod tests {
                 description: Some("Post without title and default styles"),
                 css_stylesheet: Some("/styles/post.css"),
                 is_post: Some(true),
+                created_at: Some("2026-06-26"),
                 include_title: Some(false),
                 include_styles: Some(false),
                 ..Default::default()
