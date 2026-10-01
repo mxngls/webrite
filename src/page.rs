@@ -303,15 +303,15 @@ fn render_head(page: &Page, blocks: &Blocks) -> String {
         .map(|d| format!("<meta name=\"description\" content=\"{}\">\n", escape_html(d)))
         .unwrap_or_default();
 
-    let custom_style_link = headers.css_stylesheet.as_ref().map_or_else(String::new, |s| {
-        format!("<link href=\"{}\" rel=\"stylesheet\"/>\n", escape_html(s))
-    });
-
     let style_link = if headers.include_styles {
         format!("<link href=\"{DEFAULT_STYLESHEET}\" rel=\"stylesheet\"/>\n")
     } else {
         String::new()
     };
+
+    let custom_style_link = headers.css_stylesheet.as_ref().map_or_else(String::new, |s| {
+        format!("<link href=\"{}\" rel=\"stylesheet\"/>\n", escape_html(s))
+    });
 
     let head_block = blocks.head.as_deref().unwrap_or("<!-- head -->\n");
 
@@ -319,8 +319,8 @@ fn render_head(page: &Page, blocks: &Blocks) -> String {
         "<head>\n\
              <title>{escaped_title}</title>\n\
              {description_meta}\
-             {custom_style_link}\
              {style_link}\
+             {custom_style_link}\
              <link href=\"/feed.atom\" type=\"application/atom+xml\" rel=\"alternate\"/>\n\
              {head_block}\
          </head>\n\
@@ -1457,6 +1457,31 @@ mod tests {
             assert!(!page.contains("<article>"), "got {page}");
             assert!(
                 page.contains(&format!("<link href=\"{DEFAULT_STYLESHEET}\" rel=\"stylesheet\"/>")),
+                "got {page}"
+            );
+        }
+
+        #[test]
+        fn default_stylesheet_preceeds_custom_one() {
+            let headers = PageHeadersBuilder {
+                title: Some("Page"),
+                is_post: Some(false),
+                include_styles: Some(true),
+                css_stylesheet: Some("/styles/override.css"),
+                ..Default::default()
+            }
+            .build()
+            .unwrap();
+
+            let page = render(&default_page(headers));
+
+            eprintln!("{page}");
+
+            assert!(
+                page.contains(
+                    "<link href=\"/style.css\" rel=\"stylesheet\"/>\n\
+                     <link href=\"/styles/override.css\" rel=\"stylesheet\"/>\n"
+                ),
                 "got {page}"
             );
         }
