@@ -304,13 +304,16 @@ fn render_head(page: &Page, blocks: &Blocks) -> String {
         .unwrap_or_default();
 
     let style_link = if headers.include_styles {
-        format!("<link href=\"{DEFAULT_STYLESHEET}\" rel=\"stylesheet\"/>\n")
+        format!("<link href=\"{DEFAULT_STYLESHEET}\" rel=\"stylesheet\" type=\"text/css\"/>\n")
     } else {
         String::new()
     };
 
     let custom_style_link = headers.css_stylesheet.as_ref().map_or_else(String::new, |s| {
-        format!("<link href=\"{}\" rel=\"stylesheet\"/>\n", escape_html(s))
+        format!(
+            "<link href=\"{}\" rel=\"stylesheet\" type=\"text/css\"/>\n",
+            escape_html(s)
+        )
     });
 
     let head_block = blocks.head.as_deref().unwrap_or("<!-- head -->\n");
@@ -1363,7 +1366,7 @@ mod tests {
 
             assert!(
                 page.contains(
-                    "<link href=\"/styles/escaped &lt;, &gt;, &amp;, &quot; and &#39;.css\" rel=\"stylesheet\"/>"
+                    "<link href=\"/styles/escaped &lt;, &gt;, &amp;, &quot; and &#39;.css\" rel=\"stylesheet\" type=\"text/css\"/>"
                 ),
                 "got {page}"
             );
@@ -1429,12 +1432,14 @@ mod tests {
             );
             assert!(!page.contains("<h1>"), "got {page}");
             assert!(
-                !page.contains(&format!("<link href=\"{DEFAULT_STYLESHEET}\" rel=\"stylesheet\"/>")),
+                !page.contains(&format!(
+                    "<link href=\"{DEFAULT_STYLESHEET}\" rel=\"stylesheet\" type=\"text/css\"/>"
+                )),
                 "got {page}"
             );
             // custom stylesheet does not depend on the default one
             assert!(
-                page.contains("<link href=\"/styles/post.css\" rel=\"stylesheet\"/>"),
+                page.contains("<link href=\"/styles/post.css\" rel=\"stylesheet\" type=\"text/css\"/>"),
                 "got {page}"
             );
         }
@@ -1456,7 +1461,9 @@ mod tests {
             assert!(page.contains("<h1>Page</h1>\n<p>example page body</p>\n"), "got {page}");
             assert!(!page.contains("<article>"), "got {page}");
             assert!(
-                page.contains(&format!("<link href=\"{DEFAULT_STYLESHEET}\" rel=\"stylesheet\"/>")),
+                page.contains(&format!(
+                    "<link href=\"{DEFAULT_STYLESHEET}\" rel=\"stylesheet\" type=\"text/css\"/>"
+                )),
                 "got {page}"
             );
         }
@@ -1479,8 +1486,8 @@ mod tests {
 
             assert!(
                 page.contains(
-                    "<link href=\"/style.css\" rel=\"stylesheet\"/>\n\
-                     <link href=\"/styles/override.css\" rel=\"stylesheet\"/>\n"
+                    "<link href=\"/style.css\" rel=\"stylesheet\" type=\"text/css\"/>\n\
+                     <link href=\"/styles/override.css\" rel=\"stylesheet\" type=\"text/css\"/>\n"
                 ),
                 "got {page}"
             );
@@ -1597,14 +1604,14 @@ mod tests {
                 &default_page(page_headers()),
                 [(
                     BlockKind::Head,
-                    "<link href=\"/styles/override.css\" rel=\"stylesheet\"/>\n",
+                    "<link href=\"/styles/override.css\" rel=\"stylesheet\" type=\"text/css\"/>\n",
                 )],
             );
 
             assert!(
                 page.contains(
                     "<link href=\"/feed.atom\" type=\"application/atom+xml\" rel=\"alternate\"/>\n\
-                     <link href=\"/styles/override.css\" rel=\"stylesheet\"/>\n\
+                     <link href=\"/styles/override.css\" rel=\"stylesheet\" type=\"text/css\"/>\n\
                      </head>"
                 ),
                 "got {page}"
