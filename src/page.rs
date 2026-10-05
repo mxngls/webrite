@@ -318,10 +318,27 @@ fn render_head(page: &Page, blocks: &Blocks) -> String {
 
     let head_block = blocks.head.as_deref().unwrap_or("<!-- head -->\n");
 
+    // The followign two tags are mandatory and so are emitted for every page:
+    //
+    //   1. <meta charset>  Leads the head. The encoding declaration has to sit within the first
+    //                      1024 bytes, and has to come before a title or description in case they
+    //                      hold non-ASCII characters.
+    //
+    //                      Reference: <https://developer.mozilla.org/en-US/docs/Web/HTML/Reference/Elements/meta#charset>
+    //
+    //   2. <meta viewport> Omitting it makes mobile browsers lay out the page at 980px and then
+    //                      zoom out.
+    //
+    //                      Reference: <https://developer.mozilla.org/en-US/docs/Web/HTML/Reference/Elements/meta/name/viewport>
+    //
+    // The head block is appended last and may repeat either one to override it; see
+    // `head_block_extends_the_defaults` and `head_block_can_override_the_defaults`.
     format!(
         "<head>\n\
+             <meta charset=\"utf-8\"/>\n\
              <title>{escaped_title}</title>\n\
              {description_meta}\
+             <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"/>\n\
              {style_link}\
              {custom_style_link}\
              <link href=\"/feed.atom\" type=\"application/atom+xml\" rel=\"alternate\"/>\n\
@@ -1578,13 +1595,16 @@ mod tests {
         fn head_block_extends_the_defaults() {
             let page = render_with(
                 &default_page(page_headers()),
-                [(
-                    BlockKind::Head,
-                    "<meta name=\"viewport\" content=\"width=device-width\">\n",
-                )],
+                [(BlockKind::Head, "<meta name=\"author\" content=\"Example\">\n")],
             );
 
-            // the defaults survive ...
+            // the mandatory tags survive, charset still leading the head ...
+            assert!(page.contains("<head>\n<meta charset=\"utf-8\"/>\n"), "got {page}");
+            assert!(
+                page.contains("<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"/>"),
+                "got {page}"
+            );
+            // ... as do the rest of the defaults ...
             assert!(page.contains("<title>Page</title>"), "got {page}");
             assert!(
                 page.contains("<link href=\"/feed.atom\" type=\"application/atom+xml\" rel=\"alternate\"/>"),
@@ -1592,7 +1612,7 @@ mod tests {
             );
             // ... and the block is added to them, verbatim
             assert!(
-                page.contains("<meta name=\"viewport\" content=\"width=device-width\">"),
+                page.contains("<meta name=\"author\" content=\"Example\">"),
                 "got {page}"
             );
         }
@@ -1604,7 +1624,8 @@ mod tests {
                 &default_page(page_headers()),
                 [(
                     BlockKind::Head,
-                    "<link href=\"/styles/override.css\" rel=\"stylesheet\" type=\"text/css\"/>\n",
+                    "<link href=\"/styles/override.css\" rel=\"stylesheet\" type=\"text/css\"/>\n\
+                     <meta name=\"viewport\" content=\"width=device-width\">\n",
                 )],
             );
 
@@ -1612,10 +1633,13 @@ mod tests {
                 page.contains(
                     "<link href=\"/feed.atom\" type=\"application/atom+xml\" rel=\"alternate\"/>\n\
                      <link href=\"/styles/override.css\" rel=\"stylesheet\" type=\"text/css\"/>\n\
+                     <meta name=\"viewport\" content=\"width=device-width\">\n\
                      </head>"
                 ),
                 "got {page}"
             );
+            // the mandatory charset is not displaced by a block, so it keeps the lead
+            assert!(page.contains("<head>\n<meta charset=\"utf-8\"/>\n"), "got {page}");
         }
     }
 }
