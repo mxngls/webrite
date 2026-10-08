@@ -999,6 +999,25 @@ mod tests {
                 "got {headers:?}"
             );
         }
+
+        #[test]
+        fn reports_missing_value_before_unknown_key() {
+            let header_str = "subtitle:\n";
+
+            let headers = parse_header(header_str);
+
+            assert!(
+                matches!(
+                    &headers,
+                    Err(ParsePageHeaderError {
+                        line: 1,
+                        kind: ParsePageHeaderErrorKind::MissingValue(k),
+                    }) if k == "subtitle"
+                ),
+                "got {headers:?}"
+            );
+        }
+
         #[test]
         fn rejects_unkown_key() {
             let header_str = indoc! {"
