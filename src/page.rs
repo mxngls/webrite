@@ -662,10 +662,10 @@ impl fmt::Display for ParsePageHeaderError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match &self.kind {
             ParsePageHeaderErrorKind::MissingColon => write!(f, "missing ':'"),
-            ParsePageHeaderErrorKind::MissingValue(k) => write!(f, "missing value for '{k}' key"),
+            ParsePageHeaderErrorKind::MissingValue(k) => write!(f, "missing value for '{k}' header"),
             ParsePageHeaderErrorKind::DuplicateKey(k) => write!(f, "duplicate header key '{k}'"),
             ParsePageHeaderErrorKind::MissingRequiredKey(k) => write!(f, "missing required '{k}' header"),
-            ParsePageHeaderErrorKind::UnknownKey(k) => write!(f, "unkown header key '{k}'"),
+            ParsePageHeaderErrorKind::UnknownKey(k) => write!(f, "unknown header key '{k}'"),
             ParsePageHeaderErrorKind::InvalidBool(k) => {
                 write!(f, "valid values for '{k}' are 'yes' ('y') or 'no' ('n')")
             }
