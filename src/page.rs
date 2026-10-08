@@ -103,7 +103,7 @@ impl<'a> PageHeadersBuilder<'a> {
         let description = if is_post {
             Some(
                 self.description
-                    .ok_or_else(|| ParsePageHeaderErrorKind::MissingRequiredHeader(HeaderKey::Description.to_string()))?
+                    .ok_or_else(|| ParsePageHeaderErrorKind::MissingRequiredKey(HeaderKey::Description.to_string()))?
                     .to_owned(),
             )
         } else {
@@ -111,11 +111,11 @@ impl<'a> PageHeadersBuilder<'a> {
         };
         let title = self
             .title
-            .ok_or_else(|| ParsePageHeaderErrorKind::MissingRequiredHeader(HeaderKey::Title.to_string()))?;
+            .ok_or_else(|| ParsePageHeaderErrorKind::MissingRequiredKey(HeaderKey::Title.to_string()))?;
         let created_at = if is_post {
             Some(
                 self.created_at
-                    .ok_or_else(|| ParsePageHeaderErrorKind::MissingRequiredHeader(HeaderKey::CreatedAt.to_string()))?
+                    .ok_or_else(|| ParsePageHeaderErrorKind::MissingRequiredKey(HeaderKey::CreatedAt.to_string()))?
                     .to_owned(),
             )
         } else {
@@ -650,10 +650,10 @@ impl fmt::Display for ParsePageHeaderError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match &self.kind {
             ParsePageHeaderErrorKind::MissingColon => write!(f, "missing ':'"),
-            ParsePageHeaderErrorKind::MissingRequiredHeader(k) => write!(f, "missing required '{k}' header"),
+            ParsePageHeaderErrorKind::MissingRequiredKey(k) => write!(f, "missing required '{k}' header"),
             ParsePageHeaderErrorKind::MissingValue(k) => write!(f, "missing value for '{k}' header"),
             ParsePageHeaderErrorKind::UnknownKey(k) => write!(f, "unkown header key '{k}'"),
-            ParsePageHeaderErrorKind::DuplicateKey(k) => write!(f, "duplicate header key '{k}"),
+            ParsePageHeaderErrorKind::DuplicateKey(k) => write!(f, "duplicate header key '{k}'"),
             ParsePageHeaderErrorKind::InvalidBool(k) => {
                 write!(f, "valid values for '{k}' are 'yes' ('y') or 'no' ('n')")
             }
@@ -673,7 +673,7 @@ impl WithPath for ParsePageHeaderError {
 enum ParsePageHeaderErrorKind {
     MissingColon,
     MissingValue(String),
-    MissingRequiredHeader(String),
+    MissingRequiredKey(String),
     UnknownKey(String),
     DuplicateKey(String),
     InvalidBool(String),
@@ -870,7 +870,7 @@ mod tests {
                     &headers,
                     Err(ParsePageHeaderError {
                         line: 1,
-                        kind: ParsePageHeaderErrorKind::MissingRequiredHeader(k),
+                        kind: ParsePageHeaderErrorKind::MissingRequiredKey(k),
                     }) if k == "title"
                 ),
                 "got {headers:?}"
@@ -891,7 +891,7 @@ mod tests {
                     &headers,
                     Err(ParsePageHeaderError {
                         line: 2,
-                        kind: ParsePageHeaderErrorKind::MissingRequiredHeader(k),
+                        kind: ParsePageHeaderErrorKind::MissingRequiredKey(k),
                     }) if k == "description"
                 ),
                 "got {headers:?}"
@@ -913,7 +913,7 @@ mod tests {
                     &headers,
                     Err(ParsePageHeaderError {
                         line: 3,
-                        kind: ParsePageHeaderErrorKind::MissingRequiredHeader(k),
+                        kind: ParsePageHeaderErrorKind::MissingRequiredKey(k),
                     }) if k == "created_at"
                 ),
                 "got {headers:?}"
