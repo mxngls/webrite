@@ -276,6 +276,130 @@ impl<'a> KeyValueBlockBuilder<'a> for PageHeadersBuilder<'a> {
     }
 }
 
+pub struct SiteConfig<'a> {
+    author: &'a str,
+    host: &'a str,
+    source: &'a str,
+    target: &'a str,
+    title: &'a str,
+    url: &'a str,
+}
+
+impl<'a> FromKeyValueBlock<'a> for SiteConfig<'a> {
+    type Builder = SiteConfigBuilder<'a>;
+}
+
+enum SiteConfigKey {
+    Author,
+    Host,
+    Source,
+    Target,
+    Title,
+    Url,
+}
+
+impl SiteConfigKey {
+    const fn as_str(&self) -> &str {
+        match self {
+            Self::Author => "author",
+            Self::Host => "host",
+            Self::Source => "source",
+            Self::Target => "target",
+            Self::Title => "title",
+            Self::Url => "url",
+        }
+    }
+}
+
+impl FromStr for SiteConfigKey {
+    type Err = ();
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Ok(match s {
+            "author" => Self::Author,
+            "host" => Self::Host,
+            "source" => Self::Source,
+            "target" => Self::Target,
+            "title" => Self::Title,
+            "url" => Self::Url,
+            _ => return Err(()),
+        })
+    }
+}
+
+impl std::fmt::Display for SiteConfigKey {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.as_str())
+    }
+}
+
+#[derive(Default)]
+struct SiteConfigBuilder<'a> {
+    source: Option<&'a str>,
+    target: Option<&'a str>,
+    title: Option<&'a str>,
+    author: Option<&'a str>,
+    host: Option<&'a str>,
+    url: Option<&'a str>,
+}
+
+impl<'a> SiteConfigBuilder<'a> {
+    fn set_once<T>(field: &mut Option<T>, key: &SiteConfigKey, val: T) -> Result<(), ParseKeyValueBlockKind> {
+        if field.is_some() {
+            return Err(ParseKeyValueBlockKind::DuplicateKey(key.to_string()));
+        }
+        *field = Some(val);
+        Ok(())
+    }
+
+    fn set(&mut self, key: &SiteConfigKey, val: &'a str) -> Result<(), ParseKeyValueBlockKind> {
+        match key {
+            SiteConfigKey::Author => Self::set_once(&mut self.author, key, val),
+            SiteConfigKey::Host => Self::set_once(&mut self.host, key, val),
+            SiteConfigKey::Source => Self::set_once(&mut self.source, key, val),
+            SiteConfigKey::Target => Self::set_once(&mut self.target, key, val),
+            SiteConfigKey::Title => Self::set_once(&mut self.title, key, val),
+            SiteConfigKey::Url => Self::set_once(&mut self.url, key, val),
+        }
+    }
+
+    fn build(self) -> Result<SiteConfig<'a>, ParseKeyValueBlockKind> {
+        Ok(SiteConfig {
+            author: self
+                .author
+                .ok_or_else(|| ParseKeyValueBlockKind::MissingRequiredKey(SiteConfigKey::Author.to_string()))?,
+            host: self
+                .host
+                .ok_or_else(|| ParseKeyValueBlockKind::MissingRequiredKey(SiteConfigKey::Host.to_string()))?,
+            source: self
+                .source
+                .ok_or_else(|| ParseKeyValueBlockKind::MissingRequiredKey(SiteConfigKey::Source.to_string()))?,
+            target: self
+                .target
+                .ok_or_else(|| ParseKeyValueBlockKind::MissingRequiredKey(SiteConfigKey::Target.to_string()))?,
+            title: self
+                .title
+                .ok_or_else(|| ParseKeyValueBlockKind::MissingRequiredKey(SiteConfigKey::Title.to_string()))?,
+            url: self
+                .url
+                .ok_or_else(|| ParseKeyValueBlockKind::MissingRequiredKey(SiteConfigKey::Url.to_string()))?,
+        })
+    }
+}
+
+impl<'a> KeyValueBlockBuilder<'a> for SiteConfigBuilder<'a> {
+    type Key = SiteConfigKey;
+    type Output = SiteConfig<'a>;
+
+    fn set(&mut self, key: &Self::Key, val: &'a str) -> Result<(), ParseKeyValueBlockKind> {
+        SiteConfigBuilder::set(self, key, val)
+    }
+
+    fn build(self) -> Result<Self::Output, ParseKeyValueBlockKind> {
+        SiteConfigBuilder::build(self)
+    }
+}
+
 pub fn split_page(page_str: &str) -> Result<(&str, &str), ReadPageError> {
     let mut offset = 0;
 
@@ -580,6 +704,10 @@ pub enum Error {
         path: PathBuf,
         source: ReadPageError,
     },
+    ParseSiteConfig {
+        path: PathBuf,
+        source: ParseKeyValueBlockError,
+    },
     ReadBlock {
         path: PathBuf,
         source: ReadBlockError,
@@ -598,6 +726,9 @@ impl fmt::Display for Error {
             Self::ParsePageHeader { path, source } => {
                 write!(f, "{}:{}", path.display(), source.line)
             }
+            Self::ParseSiteConfig { path, source } => {
+                write!(f, "{}:{}", path.display(), source.line)
+            }
         }
     }
 }
@@ -608,6 +739,7 @@ impl std::error::Error for Error {
             Self::Io { source, .. } => Some(source),
             Self::ReadPageHeader { source, .. } => Some(source),
             Self::ParsePageHeader { source, .. } => Some(source),
+            Self::ParseSiteConfig { source, .. } => Some(source),
             Self::ReadBlock { source, .. } => Some(source),
         }
     }
@@ -1080,7 +1212,7 @@ mod tests {
         }
 
         #[test]
-        fn rejects_unkown_key() {
+        fn rejects_unknown_key() {
             let header_str = indoc! {"
                 title: Example
                 subtitle: Our first example

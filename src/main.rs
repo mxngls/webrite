@@ -4,10 +4,11 @@ use std::{fs, process};
 mod page;
 
 use crate::page::{
-    BLOCK_DIR, Blocks, DRAFT_DIR, Error, IN_DIR, OUT_DIR, Page, PathContext, parse_kv_block, split_page, write_page,
+    BLOCK_DIR, Blocks, DRAFT_DIR, Error, IN_DIR, OUT_DIR, Page, PathContext, SiteConfig, parse_kv_block, split_page,
+    write_page,
 };
 
-fn process_file(input_path: &Path, blocks: &Blocks) -> Result<Page, Error> {
+fn build_page(input_path: &Path, blocks: &Blocks) -> Result<Page, Error> {
     let page_str = fs::read_to_string(input_path).at_path(input_path)?;
 
     let (headers, body) = split_page(&page_str).at_path(input_path)?;
@@ -24,9 +25,13 @@ fn process_file(input_path: &Path, blocks: &Blocks) -> Result<Page, Error> {
     Ok(page)
 }
 
-fn process_dir(input_dir: &Path) -> Result<(), Error> {
+fn build_site(input_dir: &Path) -> Result<(), Error> {
     let blocks = Blocks::from_dir(&input_dir.join(BLOCK_DIR))?;
 
+    let config_path = Path::new("webrite.txt");
+    let config_str = fs::read_to_string(config_path).at_path(config_path)?;
+    // TODO: Use config
+    let _config = parse_kv_block::<SiteConfig>(&config_str).at_path(config_path)?;
     let mut dir_stack = vec![input_dir.to_path_buf()];
 
     while let Some(dir) = dir_stack.pop() {
@@ -64,7 +69,7 @@ fn process_dir(input_dir: &Path) -> Result<(), Error> {
 
 fn main() -> process::ExitCode {
     let content_dir = Path::new(&IN_DIR);
-    match process_dir(content_dir) {
+    match build_site(content_dir) {
         Ok(()) => process::ExitCode::SUCCESS,
         Err(e) => {
             eprintln!("error: {e}");
