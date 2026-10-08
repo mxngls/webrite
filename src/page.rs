@@ -245,25 +245,38 @@ pub fn split_page(page_str: &str) -> Result<(&str, &str), ReadPageError> {
     Ok((header, body))
 }
 
+fn parse_kv_line(line: &str) -> Result<Option<(&str, &str)>, ParseKeyValuePairError> {
+    if line.trim().is_empty() {
+        return Ok(None);
+    }
+
+    let Some((key, val)) = line.split_once(':') else {
+        return Err(ParseKeyValuePairError::MissingColon);
+    };
+
+    let key = key.trim();
+    let val = val.trim();
+
+    if val.is_empty() {
+        return Err(ParseKeyValuePairError::MissingValue(key.to_owned()));
+    }
+
+    Ok(Some((key, val)))
+}
+
 pub fn parse_header(header_block: &str) -> Result<PageHeaders, ParsePageHeaderError> {
     let mut headers_builder = PageHeadersBuilder::default();
     let mut ln = 0;
     for (i, line) in header_block.lines().enumerate() {
         ln = i + 1;
-        if line.trim().is_empty() {
+
+        let Some((key, val)) = parse_kv_line(line).map_err(|k| ParsePageHeaderErrorKind::from(k).at(ln))? else {
             continue;
-        }
-        let Some((key, val)) = line.split_once(':') else {
-            return Err(ParsePageHeaderErrorKind::MissingColon.at(ln));
-        };
-        let Ok(key) = key.trim().parse::<HeaderKey>() else {
-            return Err(ParsePageHeaderErrorKind::UnknownKey(key.trim().to_owned()).at(ln));
         };
 
-        let val = val.trim();
-        if val.is_empty() {
-            return Err(ParsePageHeaderErrorKind::MissingValue(key.to_string().trim().to_owned()).at(ln));
-        }
+        let Ok(key) = key.parse::<HeaderKey>() else {
+            return Err(ParsePageHeaderErrorKind::UnknownKey(key.to_owned()).at(ln));
+        };
 
         headers_builder.set(&key, val).map_err(|k| k.at(ln))?;
     }
@@ -650,10 +663,10 @@ impl fmt::Display for ParsePageHeaderError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match &self.kind {
             ParsePageHeaderErrorKind::MissingColon => write!(f, "missing ':'"),
-            ParsePageHeaderErrorKind::MissingRequiredKey(k) => write!(f, "missing required '{k}' header"),
-            ParsePageHeaderErrorKind::MissingValue(k) => write!(f, "missing value for '{k}' header"),
-            ParsePageHeaderErrorKind::UnknownKey(k) => write!(f, "unkown header key '{k}'"),
+            ParsePageHeaderErrorKind::MissingValue(k) => write!(f, "missing value for '{k}' key"),
             ParsePageHeaderErrorKind::DuplicateKey(k) => write!(f, "duplicate header key '{k}'"),
+            ParsePageHeaderErrorKind::MissingRequiredKey(k) => write!(f, "missing required '{k}' header"),
+            ParsePageHeaderErrorKind::UnknownKey(k) => write!(f, "unkown header key '{k}'"),
             ParsePageHeaderErrorKind::InvalidBool(k) => {
                 write!(f, "valid values for '{k}' are 'yes' ('y') or 'no' ('n')")
             }
@@ -673,15 +686,30 @@ impl WithPath for ParsePageHeaderError {
 enum ParsePageHeaderErrorKind {
     MissingColon,
     MissingValue(String),
+    DuplicateKey(String),
     MissingRequiredKey(String),
     UnknownKey(String),
-    DuplicateKey(String),
     InvalidBool(String),
 }
 
 impl ParsePageHeaderErrorKind {
     const fn at(self, line: usize) -> ParsePageHeaderError {
         ParsePageHeaderError { line, kind: self }
+    }
+}
+
+#[derive(Debug)]
+enum ParseKeyValuePairError {
+    MissingColon,
+    MissingValue(String),
+}
+
+impl From<ParseKeyValuePairError> for ParsePageHeaderErrorKind {
+    fn from(kind: ParseKeyValuePairError) -> Self {
+        match kind {
+            ParseKeyValuePairError::MissingColon => Self::MissingColon,
+            ParseKeyValuePairError::MissingValue(k) => Self::MissingValue(k),
+        }
     }
 }
 
