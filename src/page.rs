@@ -983,6 +983,23 @@ mod tests {
         }
 
         #[test]
+        fn rejects_missing_value() {
+            let header_str = "title:\n";
+
+            let headers = parse_header(header_str);
+
+            assert!(
+                matches!(
+                    &headers,
+                    Err(ParsePageHeaderError {
+                        line: 1,
+                        kind: ParsePageHeaderErrorKind::MissingValue(k),
+                    }) if k == "title"
+                ),
+                "got {headers:?}"
+            );
+        }
+        #[test]
         fn rejects_unkown_key() {
             let header_str = indoc! {"
                 title: Example
