@@ -13,6 +13,62 @@ pub static DRAFT_DIR: &str = "drafts";
 pub static DEFAULT_STYLESHEET: &str = "/style.css";
 pub static DEFAULT_WRAP_ID: &str = "wrap";
 
+trait KeyValueBlockBuilder<'a>: Default {
+    type Key: FromStr;
+    type Output;
+
+    fn set(&mut self, key: &Self::Key, val: &'a str) -> Result<(), ParseKeyValueBlockKind>;
+
+    fn build(self) -> Result<Self::Output, ParseKeyValueBlockKind>;
+}
+
+trait FromKeyValueBlock<'a>: Sized {
+    type Builder: KeyValueBlockBuilder<'a, Output = Self>;
+}
+
+pub fn parse_kv_block<'a, T>(header_block: &'a str) -> Result<T, ParseKeyValueBlockError>
+where
+    T: FromKeyValueBlock<'a>,
+{
+    let mut builder = <<T as FromKeyValueBlock<'a>>::Builder as Default>::default();
+    let mut ln = 0;
+
+    for (i, line) in header_block.lines().enumerate() {
+        ln = i + 1;
+
+        let Some((key, val)) = parse_kv_line(line).map_err(|k| ParseKeyValueBlockKind::from(k).at(ln))? else {
+            continue;
+        };
+
+        let Ok(key) = key.parse::<<T::Builder as KeyValueBlockBuilder<'a>>::Key>() else {
+            return Err(ParseKeyValueBlockKind::UnknownKey(key.to_owned()).at(ln));
+        };
+
+        builder.set(&key, val).map_err(|k| k.at(ln))?;
+    }
+
+    builder.build().map_err(|k| k.at(ln))
+}
+
+fn parse_kv_line(line: &str) -> Result<Option<(&str, &str)>, ParseKeyValuePairError> {
+    if line.trim().is_empty() {
+        return Ok(None);
+    }
+
+    let Some((key, val)) = line.split_once(':') else {
+        return Err(ParseKeyValuePairError::MissingColon);
+    };
+
+    let key = key.trim();
+    let val = val.trim();
+
+    if val.is_empty() {
+        return Err(ParseKeyValuePairError::MissingValue(key.to_owned()));
+    }
+
+    Ok(Some((key, val)))
+}
+
 #[derive(Debug)]
 pub struct Page {
     path: PathBuf,
@@ -44,102 +100,8 @@ pub struct PageHeaders {
     include_styles: bool,
 }
 
-#[allow(clippy::struct_excessive_bools)]
-#[derive(Debug, Default)]
-struct PageHeadersBuilder<'a> {
-    title: Option<&'a str>,
-    description: Option<&'a str>,
-
-    created_at: Option<&'a str>,
-
-    css_classes: Option<&'a str>,
-    css_stylesheet: Option<&'a str>,
-
-    is_post: Option<bool>,
-    include_header: Option<bool>,
-    include_footer: Option<bool>,
-    include_title: Option<bool>,
-    include_styles: Option<bool>,
-}
-
-impl<'a> PageHeadersBuilder<'a> {
-    fn set_once<T>(field: &mut Option<T>, key: &HeaderKey, val: T) -> Result<(), ParsePageHeaderErrorKind> {
-        if field.is_some() {
-            return Err(ParsePageHeaderErrorKind::DuplicateKey(key.to_string()));
-        }
-        *field = Some(val);
-        Ok(())
-    }
-
-    fn parse_bool(val: &str) -> Result<bool, ParsePageHeaderErrorKind> {
-        match val.trim().to_ascii_lowercase().as_str() {
-            "y" | "yes" => Ok(true),
-            "n" | "no" => Ok(false),
-            _ => Err(ParsePageHeaderErrorKind::InvalidBool(val.trim().to_owned())),
-        }
-    }
-
-    fn set(&mut self, key: &HeaderKey, val: &'a str) -> Result<(), ParsePageHeaderErrorKind> {
-        match key {
-            // string headers
-            HeaderKey::Title => Self::set_once(&mut self.title, key, val)?,
-            HeaderKey::Description => Self::set_once(&mut self.description, key, val)?,
-            HeaderKey::CreatedAt => Self::set_once(&mut self.created_at, key, val)?,
-            HeaderKey::CSSClasses => Self::set_once(&mut self.css_classes, key, val)?,
-            HeaderKey::CSSStylesheet => Self::set_once(&mut self.css_stylesheet, key, val)?,
-
-            // boolean headers
-            HeaderKey::IsPost => Self::set_once(&mut self.is_post, key, Self::parse_bool(val)?)?,
-            HeaderKey::IncludeHeader => Self::set_once(&mut self.include_header, key, Self::parse_bool(val)?)?,
-            HeaderKey::IncludeFooter => Self::set_once(&mut self.include_footer, key, Self::parse_bool(val)?)?,
-            HeaderKey::IncludeTitle => Self::set_once(&mut self.include_title, key, Self::parse_bool(val)?)?,
-            HeaderKey::IncludeStyles => Self::set_once(&mut self.include_styles, key, Self::parse_bool(val)?)?,
-        }
-        Ok(())
-    }
-
-    fn build(self) -> Result<PageHeaders, ParsePageHeaderErrorKind> {
-        let is_post = self.is_post.unwrap_or(true);
-        let description = if is_post {
-            Some(
-                self.description
-                    .ok_or_else(|| ParsePageHeaderErrorKind::MissingRequiredKey(HeaderKey::Description.to_string()))?
-                    .to_owned(),
-            )
-        } else {
-            self.description.map(str::to_owned)
-        };
-        let title = self
-            .title
-            .ok_or_else(|| ParsePageHeaderErrorKind::MissingRequiredKey(HeaderKey::Title.to_string()))?;
-        let created_at = if is_post {
-            Some(
-                self.created_at
-                    .ok_or_else(|| ParsePageHeaderErrorKind::MissingRequiredKey(HeaderKey::CreatedAt.to_string()))?
-                    .to_owned(),
-            )
-        } else {
-            self.created_at.map(str::to_owned)
-        };
-
-        Ok(PageHeaders {
-            // required
-            title: title.to_string(),
-            description,
-
-            created_at,
-
-            css_classes: self.css_classes.map(str::to_owned),
-            css_stylesheet: self.css_stylesheet.map(str::to_owned),
-            include_header: self.include_header.unwrap_or(true),
-            include_footer: self.include_footer.unwrap_or(true),
-
-            is_post,
-            // post overrides
-            include_title: self.include_title.unwrap_or(is_post),
-            include_styles: self.include_styles.unwrap_or(is_post),
-        })
-    }
+impl<'a> FromKeyValueBlock<'a> for PageHeaders {
+    type Builder = PageHeadersBuilder<'a>;
 }
 
 enum HeaderKey {
@@ -203,6 +165,117 @@ impl std::fmt::Display for HeaderKey {
     }
 }
 
+#[allow(clippy::struct_excessive_bools)]
+#[derive(Debug, Default)]
+struct PageHeadersBuilder<'a> {
+    title: Option<&'a str>,
+    description: Option<&'a str>,
+
+    created_at: Option<&'a str>,
+
+    css_classes: Option<&'a str>,
+    css_stylesheet: Option<&'a str>,
+
+    is_post: Option<bool>,
+    include_header: Option<bool>,
+    include_footer: Option<bool>,
+    include_title: Option<bool>,
+    include_styles: Option<bool>,
+}
+
+impl<'a> PageHeadersBuilder<'a> {
+    fn set_once<T>(field: &mut Option<T>, key: &HeaderKey, val: T) -> Result<(), ParseKeyValueBlockKind> {
+        if field.is_some() {
+            return Err(ParseKeyValueBlockKind::DuplicateKey(key.to_string()));
+        }
+        *field = Some(val);
+        Ok(())
+    }
+
+    fn parse_bool(val: &str) -> Result<bool, ParseKeyValueBlockKind> {
+        match val.trim().to_ascii_lowercase().as_str() {
+            "y" | "yes" => Ok(true),
+            "n" | "no" => Ok(false),
+            _ => Err(ParseKeyValueBlockKind::InvalidBool(val.trim().to_owned())),
+        }
+    }
+
+    fn set(&mut self, key: &HeaderKey, val: &'a str) -> Result<(), ParseKeyValueBlockKind> {
+        match key {
+            // string headers
+            HeaderKey::Title => Self::set_once(&mut self.title, key, val)?,
+            HeaderKey::Description => Self::set_once(&mut self.description, key, val)?,
+            HeaderKey::CreatedAt => Self::set_once(&mut self.created_at, key, val)?,
+            HeaderKey::CSSClasses => Self::set_once(&mut self.css_classes, key, val)?,
+            HeaderKey::CSSStylesheet => Self::set_once(&mut self.css_stylesheet, key, val)?,
+
+            // boolean headers
+            HeaderKey::IsPost => Self::set_once(&mut self.is_post, key, Self::parse_bool(val)?)?,
+            HeaderKey::IncludeHeader => Self::set_once(&mut self.include_header, key, Self::parse_bool(val)?)?,
+            HeaderKey::IncludeFooter => Self::set_once(&mut self.include_footer, key, Self::parse_bool(val)?)?,
+            HeaderKey::IncludeTitle => Self::set_once(&mut self.include_title, key, Self::parse_bool(val)?)?,
+            HeaderKey::IncludeStyles => Self::set_once(&mut self.include_styles, key, Self::parse_bool(val)?)?,
+        }
+        Ok(())
+    }
+
+    fn build(self) -> Result<PageHeaders, ParseKeyValueBlockKind> {
+        let is_post = self.is_post.unwrap_or(true);
+        let description = if is_post {
+            Some(
+                self.description
+                    .ok_or_else(|| ParseKeyValueBlockKind::MissingRequiredKey(HeaderKey::Description.to_string()))?
+                    .to_owned(),
+            )
+        } else {
+            self.description.map(str::to_owned)
+        };
+        let title = self
+            .title
+            .ok_or_else(|| ParseKeyValueBlockKind::MissingRequiredKey(HeaderKey::Title.to_string()))?;
+        let created_at = if is_post {
+            Some(
+                self.created_at
+                    .ok_or_else(|| ParseKeyValueBlockKind::MissingRequiredKey(HeaderKey::CreatedAt.to_string()))?
+                    .to_owned(),
+            )
+        } else {
+            self.created_at.map(str::to_owned)
+        };
+
+        Ok(PageHeaders {
+            // required
+            title: title.to_string(),
+            description,
+
+            created_at,
+
+            css_classes: self.css_classes.map(str::to_owned),
+            css_stylesheet: self.css_stylesheet.map(str::to_owned),
+            include_header: self.include_header.unwrap_or(true),
+            include_footer: self.include_footer.unwrap_or(true),
+
+            is_post,
+            // post overrides
+            include_title: self.include_title.unwrap_or(is_post),
+            include_styles: self.include_styles.unwrap_or(is_post),
+        })
+    }
+}
+
+impl<'a> KeyValueBlockBuilder<'a> for PageHeadersBuilder<'a> {
+    type Key = HeaderKey;
+    type Output = PageHeaders;
+
+    fn set(&mut self, key: &Self::Key, val: &'a str) -> Result<(), ParseKeyValueBlockKind> {
+        PageHeadersBuilder::set(self, key, val)
+    }
+
+    fn build(self) -> Result<Self::Output, ParseKeyValueBlockKind> {
+        PageHeadersBuilder::build(self)
+    }
+}
+
 pub fn split_page(page_str: &str) -> Result<(&str, &str), ReadPageError> {
     let mut offset = 0;
 
@@ -243,45 +316,6 @@ pub fn split_page(page_str: &str) -> Result<(&str, &str), ReadPageError> {
     }
 
     Ok((header, body))
-}
-
-fn parse_kv_line(line: &str) -> Result<Option<(&str, &str)>, ParseKeyValuePairError> {
-    if line.trim().is_empty() {
-        return Ok(None);
-    }
-
-    let Some((key, val)) = line.split_once(':') else {
-        return Err(ParseKeyValuePairError::MissingColon);
-    };
-
-    let key = key.trim();
-    let val = val.trim();
-
-    if val.is_empty() {
-        return Err(ParseKeyValuePairError::MissingValue(key.to_owned()));
-    }
-
-    Ok(Some((key, val)))
-}
-
-pub fn parse_header(header_block: &str) -> Result<PageHeaders, ParsePageHeaderError> {
-    let mut headers_builder = PageHeadersBuilder::default();
-    let mut ln = 0;
-    for (i, line) in header_block.lines().enumerate() {
-        ln = i + 1;
-
-        let Some((key, val)) = parse_kv_line(line).map_err(|k| ParsePageHeaderErrorKind::from(k).at(ln))? else {
-            continue;
-        };
-
-        let Ok(key) = key.parse::<HeaderKey>() else {
-            return Err(ParsePageHeaderErrorKind::UnknownKey(key.to_owned()).at(ln));
-        };
-
-        headers_builder.set(&key, val).map_err(|k| k.at(ln))?;
-    }
-
-    headers_builder.build().map_err(|k| k.at(ln))
 }
 
 // TODO: Instead of the naive escaping approach chosen here we could probably go with something
@@ -540,7 +574,7 @@ pub enum Error {
     },
     ParsePageHeader {
         path: PathBuf,
-        source: ParsePageHeaderError,
+        source: ParseKeyValueBlockError,
     },
     ReadPageHeader {
         path: PathBuf,
@@ -653,36 +687,36 @@ impl WithPath for ReadBlockError {
 }
 
 #[derive(Debug)]
-pub struct ParsePageHeaderError {
+pub struct ParseKeyValueBlockError {
     line: usize,
-    kind: ParsePageHeaderErrorKind,
+    kind: ParseKeyValueBlockKind,
 }
 
-impl fmt::Display for ParsePageHeaderError {
+impl fmt::Display for ParseKeyValueBlockError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match &self.kind {
-            ParsePageHeaderErrorKind::MissingColon => write!(f, "missing ':'"),
-            ParsePageHeaderErrorKind::MissingValue(k) => write!(f, "missing value for '{k}' header"),
-            ParsePageHeaderErrorKind::DuplicateKey(k) => write!(f, "duplicate header key '{k}'"),
-            ParsePageHeaderErrorKind::MissingRequiredKey(k) => write!(f, "missing required '{k}' header"),
-            ParsePageHeaderErrorKind::UnknownKey(k) => write!(f, "unknown header key '{k}'"),
-            ParsePageHeaderErrorKind::InvalidBool(k) => {
+            ParseKeyValueBlockKind::MissingColon => write!(f, "missing ':'"),
+            ParseKeyValueBlockKind::MissingValue(k) => write!(f, "missing value for '{k}' header"),
+            ParseKeyValueBlockKind::DuplicateKey(k) => write!(f, "duplicate header key '{k}'"),
+            ParseKeyValueBlockKind::MissingRequiredKey(k) => write!(f, "missing required '{k}' header"),
+            ParseKeyValueBlockKind::UnknownKey(k) => write!(f, "unknown header key '{k}'"),
+            ParseKeyValueBlockKind::InvalidBool(k) => {
                 write!(f, "valid values for '{k}' are 'yes' ('y') or 'no' ('n')")
             }
         }
     }
 }
 
-impl std::error::Error for ParsePageHeaderError {}
+impl std::error::Error for ParseKeyValueBlockError {}
 
-impl WithPath for ParsePageHeaderError {
+impl WithPath for ParseKeyValueBlockError {
     fn with_path(self, path: PathBuf) -> Error {
         Error::ParsePageHeader { path, source: self }
     }
 }
 
 #[derive(Debug)]
-enum ParsePageHeaderErrorKind {
+enum ParseKeyValueBlockKind {
     MissingColon,
     MissingValue(String),
     DuplicateKey(String),
@@ -691,9 +725,9 @@ enum ParsePageHeaderErrorKind {
     InvalidBool(String),
 }
 
-impl ParsePageHeaderErrorKind {
-    const fn at(self, line: usize) -> ParsePageHeaderError {
-        ParsePageHeaderError { line, kind: self }
+impl ParseKeyValueBlockKind {
+    const fn at(self, line: usize) -> ParseKeyValueBlockError {
+        ParseKeyValueBlockError { line, kind: self }
     }
 }
 
@@ -703,7 +737,7 @@ enum ParseKeyValuePairError {
     MissingValue(String),
 }
 
-impl From<ParseKeyValuePairError> for ParsePageHeaderErrorKind {
+impl From<ParseKeyValuePairError> for ParseKeyValueBlockKind {
     fn from(kind: ParseKeyValuePairError) -> Self {
         match kind {
             ParseKeyValuePairError::MissingColon => Self::MissingColon,
@@ -867,7 +901,7 @@ mod tests {
                 created_at: 2026-06-26
             "};
 
-            let headers = parse_header(header_str).unwrap();
+            let headers = parse_kv_block::<PageHeaders>(header_str).unwrap();
 
             assert_eq!(headers.title, "Example", "got {:?}", headers.title);
             assert_eq!(
@@ -890,14 +924,14 @@ mod tests {
                 description: example post without a title
             "};
 
-            let headers = parse_header(header_str);
+            let headers = parse_kv_block::<PageHeaders>(header_str);
 
             assert!(
                 matches!(
                     &headers,
-                    Err(ParsePageHeaderError {
+                    Err(ParseKeyValueBlockError {
                         line: 1,
-                        kind: ParsePageHeaderErrorKind::MissingRequiredKey(k),
+                        kind: ParseKeyValueBlockKind::MissingRequiredKey(k),
                     }) if k == "title"
                 ),
                 "got {headers:?}"
@@ -911,14 +945,14 @@ mod tests {
                 is_post: yes
             "};
 
-            let headers = parse_header(header_str);
+            let headers = parse_kv_block::<PageHeaders>(header_str);
 
             assert!(
                 matches!(
                     &headers,
-                    Err(ParsePageHeaderError {
+                    Err(ParseKeyValueBlockError {
                         line: 2,
-                        kind: ParsePageHeaderErrorKind::MissingRequiredKey(k),
+                        kind: ParseKeyValueBlockKind::MissingRequiredKey(k),
                     }) if k == "description"
                 ),
                 "got {headers:?}"
@@ -933,14 +967,14 @@ mod tests {
                 is_post: yes
             "};
 
-            let headers = parse_header(header_str);
+            let headers = parse_kv_block::<PageHeaders>(header_str);
 
             assert!(
                 matches!(
                     &headers,
-                    Err(ParsePageHeaderError {
+                    Err(ParseKeyValueBlockError {
                         line: 3,
-                        kind: ParsePageHeaderErrorKind::MissingRequiredKey(k),
+                        kind: ParseKeyValueBlockKind::MissingRequiredKey(k),
                     }) if k == "created_at"
                 ),
                 "got {headers:?}"
@@ -952,7 +986,7 @@ mod tests {
             let header_str =
                 "title: Example\n\n \t \ndescription: example post with blank lines\ncreated_at: 2026-06-26\n";
 
-            let headers = parse_header(header_str).unwrap();
+            let headers = parse_kv_block::<PageHeaders>(header_str).unwrap();
 
             assert_eq!(headers.title, "Example");
             assert_eq!(headers.description, Some("example post with blank lines".to_string()));
@@ -964,7 +998,7 @@ mod tests {
                               \tdescription\t:\texample post with padded fields\t\n\
                               \t created_at \t:\t2026-06-26 \t\n";
 
-            let headers = parse_header(header_str).unwrap();
+            let headers = parse_kv_block::<PageHeaders>(header_str).unwrap();
 
             assert_eq!(headers.title, "Example Page");
             assert_eq!(headers.description, Some("example post with padded fields".to_string()));
@@ -979,7 +1013,7 @@ mod tests {
                   created_at: 2026-06-26
                   "};
 
-            let headers = parse_header(header_str).unwrap();
+            let headers = parse_kv_block::<PageHeaders>(header_str).unwrap();
 
             assert_eq!(headers.title, "Example: A Post");
             assert_eq!(
@@ -995,14 +1029,14 @@ mod tests {
                 description: Title header misses a colon
             "};
 
-            let headers = parse_header(header_str);
+            let headers = parse_kv_block::<PageHeaders>(header_str);
 
             assert!(
                 matches!(
                     headers,
-                    Err(ParsePageHeaderError {
+                    Err(ParseKeyValueBlockError {
                         line: 1,
-                        kind: ParsePageHeaderErrorKind::MissingColon
+                        kind: ParseKeyValueBlockKind::MissingColon
                     })
                 ),
                 "got {headers:#?}"
@@ -1013,14 +1047,14 @@ mod tests {
         fn rejects_missing_value() {
             let header_str = "title:\n";
 
-            let headers = parse_header(header_str);
+            let headers = parse_kv_block::<PageHeaders>(header_str);
 
             assert!(
                 matches!(
                     &headers,
-                    Err(ParsePageHeaderError {
+                    Err(ParseKeyValueBlockError {
                         line: 1,
-                        kind: ParsePageHeaderErrorKind::MissingValue(k),
+                        kind: ParseKeyValueBlockKind::MissingValue(k),
                     }) if k == "title"
                 ),
                 "got {headers:?}"
@@ -1031,14 +1065,14 @@ mod tests {
         fn reports_missing_value_before_unknown_key() {
             let header_str = "subtitle:\n";
 
-            let headers = parse_header(header_str);
+            let headers = parse_kv_block::<PageHeaders>(header_str);
 
             assert!(
                 matches!(
                     &headers,
-                    Err(ParsePageHeaderError {
+                    Err(ParseKeyValueBlockError {
                         line: 1,
-                        kind: ParsePageHeaderErrorKind::MissingValue(k),
+                        kind: ParseKeyValueBlockKind::MissingValue(k),
                     }) if k == "subtitle"
                 ),
                 "got {headers:?}"
@@ -1053,14 +1087,14 @@ mod tests {
                 description: A post with a subtitle
             "};
 
-            let headers = parse_header(header_str);
+            let headers = parse_kv_block::<PageHeaders>(header_str);
 
             assert!(
                 matches!(
                     headers,
-                    Err(ParsePageHeaderError {
+                    Err(ParseKeyValueBlockError {
                         line: 2,
-                        kind: ParsePageHeaderErrorKind::UnknownKey(ref key)
+                        kind: ParseKeyValueBlockKind::UnknownKey(ref key)
                     }) if key == "subtitle"
                 ),
                 "got {headers:#?}"
@@ -1071,14 +1105,14 @@ mod tests {
         fn rejects_empty_string_key() {
             let header_str = ": Example\n";
 
-            let headers = parse_header(header_str);
+            let headers = parse_kv_block::<PageHeaders>(header_str);
 
             assert!(
                 matches!(
                     &headers,
-                    Err(ParsePageHeaderError {
+                    Err(ParseKeyValueBlockError {
                         line: 1,
-                        kind: ParsePageHeaderErrorKind::UnknownKey(k),
+                        kind: ParseKeyValueBlockKind::UnknownKey(k),
                     }) if k.is_empty()
                 ),
                 "got {headers:?}"
@@ -1093,14 +1127,14 @@ mod tests {
                 is_post: no
             "};
 
-            let headers = parse_header(header_str);
+            let headers = parse_kv_block::<PageHeaders>(header_str);
 
             assert!(
                 matches!(
                     &headers,
-                    Err(ParsePageHeaderError {
+                    Err(ParseKeyValueBlockError {
                         line: 3,
-                        kind: ParsePageHeaderErrorKind::DuplicateKey(k),
+                        kind: ParseKeyValueBlockKind::DuplicateKey(k),
                     }) if k == "is_post"
                 ),
                 "got {headers:?}"
@@ -1115,7 +1149,7 @@ mod tests {
                 created_at: 2026-06-26
             "};
 
-            let headers = parse_header(header_str).unwrap();
+            let headers = parse_kv_block::<PageHeaders>(header_str).unwrap();
 
             assert_eq!(headers.css_classes, None, "got {:?}", headers.css_classes);
             assert_eq!(headers.css_stylesheet, None, "got {:?}", headers.css_stylesheet);
@@ -1146,7 +1180,7 @@ mod tests {
                 include_styles: yes
             "};
 
-            let headers = parse_header(header_str).unwrap();
+            let headers = parse_kv_block::<PageHeaders>(header_str).unwrap();
 
             assert_eq!(headers.created_at, Some("2026-06-26".to_string()));
 
@@ -1179,7 +1213,7 @@ mod tests {
                   include_title: n
                   "};
 
-            let headers = parse_header(header_str).unwrap();
+            let headers = parse_kv_block::<PageHeaders>(header_str).unwrap();
 
             assert!(headers.is_post, "got {:?}", headers.is_post);
             assert!(headers.include_header, "got {:?}", headers.include_header);

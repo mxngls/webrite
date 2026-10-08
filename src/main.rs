@@ -4,14 +4,14 @@ use std::{fs, process};
 mod page;
 
 use crate::page::{
-    BLOCK_DIR, Blocks, DRAFT_DIR, Error, IN_DIR, OUT_DIR, Page, PathContext, parse_header, split_page, write_page,
+    BLOCK_DIR, Blocks, DRAFT_DIR, Error, IN_DIR, OUT_DIR, Page, PathContext, parse_kv_block, split_page, write_page,
 };
 
 fn process_file(input_path: &Path, blocks: &Blocks) -> Result<Page, Error> {
     let page_str = fs::read_to_string(input_path).at_path(input_path)?;
 
     let (headers, body) = split_page(&page_str).at_path(input_path)?;
-    let headers = parse_header(headers).at_path(input_path)?;
+    let headers = parse_kv_block(headers).at_path(input_path)?;
 
     let rel_path = input_path
         .strip_prefix(IN_DIR)
