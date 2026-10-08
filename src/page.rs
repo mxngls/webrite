@@ -344,8 +344,7 @@ fn render_head(page: &Page, blocks: &Blocks) -> String {
     //
     //                      Reference: <https://developer.mozilla.org/en-US/docs/Web/HTML/Reference/Elements/meta/name/viewport>
     //
-    // The head block is appended last and may repeat either one to override it; see
-    // `head_block_extends_the_defaults` and `head_block_can_override_the_defaults`.
+    // NOTE: The head block is appended last and may repeat either one to override it.
     format!(
         "<head>\n\
              <meta charset=\"utf-8\"/>\n\
