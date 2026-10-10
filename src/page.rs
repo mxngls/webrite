@@ -5,13 +5,7 @@ use std::path::Path;
 use std::path::PathBuf;
 use std::str::FromStr;
 
-pub static OUT_DIR: &str = "out";
-pub static IN_DIR: &str = "in";
-pub static BLOCK_DIR: &str = "blocks";
-pub static HEADER_SEP: &str = "---";
-pub static DRAFT_DIR: &str = "drafts";
-pub static DEFAULT_STYLESHEET: &str = "/style.css";
-pub static DEFAULT_WRAP_ID: &str = "wrap";
+const HEADER_SEP: &str = "---";
 
 trait KeyValueBlockBuilder<'a>: Default {
     type Key: FromStr;
@@ -26,7 +20,7 @@ trait FromKeyValueBlock<'a>: Sized {
     type Builder: KeyValueBlockBuilder<'a, Output = Self>;
 }
 
-pub fn parse_kv_block<'a, T>(header_block: &'a str) -> Result<T, ParseKeyValueBlockError>
+fn parse_kv_block<'a, T>(header_block: &'a str) -> Result<T, ParseKeyValueBlockError>
 where
     T: FromKeyValueBlock<'a>,
 {
@@ -464,24 +458,162 @@ impl<'a> KeyValueBlockBuilder<'a> for PageHeadersBuilder<'a> {
     }
 }
 
-pub struct SiteConfig<'a> {
+pub fn parse_headers(header_str: &str) -> Result<PageHeaders, ParseKeyValueBlockError> {
+    parse_kv_block(header_str)
+}
+
+pub fn parse_config(config_str: &'_ str) -> Result<SiteConfig<'_>, ParseKeyValueBlockError> {
+    parse_kv_block(config_str)
+}
+
+// getters-only
+pub struct BuildConfig<'a> {
+    // build
+    r#in: &'a str,
+    out: &'a str,
+    blocks: &'a str,
+    drafts: &'a str,
+}
+
+// getters-only
+impl BuildConfig<'_> {
+    pub const fn r#in(&self) -> &str {
+        self.r#in
+    }
+
+    pub const fn out(&self) -> &str {
+        self.out
+    }
+
+    pub const fn blocks(&self) -> &str {
+        self.blocks
+    }
+
+    pub const fn drafts(&self) -> &str {
+        self.drafts
+    }
+}
+
+impl<'a> Default for BuildConfig<'a> {
+    fn default() -> Self {
+        Self {
+            r#in: "in",
+            out: "out",
+            blocks: "blocks",
+            drafts: "drafts",
+        }
+    }
+}
+
+pub struct StyleConfig<'a> {
+    // css
+    stylesheet: &'a str,
+    wrapper_id: &'a str,
+}
+
+// getters-only
+impl StyleConfig<'_> {
+    pub const fn stylesheet(&self) -> &str {
+        self.stylesheet
+    }
+
+    pub const fn wrapper_id(&self) -> &str {
+        self.wrapper_id
+    }
+}
+
+impl<'a> Default for StyleConfig<'a> {
+    fn default() -> Self {
+        Self {
+            stylesheet: "style.css",
+            wrapper_id: "content",
+        }
+    }
+}
+
+pub struct FeedConfig<'a> {
+    // feed
     author: &'a str,
     host: &'a str,
-    source: &'a str,
-    target: &'a str,
     title: &'a str,
     url: &'a str,
 }
 
+// getters only
+impl FeedConfig<'_> {
+    pub const fn author(&self) -> &str {
+        self.author
+    }
+
+    pub const fn host(&self) -> &str {
+        self.host
+    }
+
+    pub const fn title(&self) -> &str {
+        self.title
+    }
+
+    pub const fn url(&self) -> &str {
+        self.url
+    }
+}
+
+pub struct SiteConfig<'a> {
+    build: BuildConfig<'a>,
+    styles: StyleConfig<'a>,
+    feed: Option<FeedConfig<'a>>,
+}
+
+impl<'a> SiteConfig<'a> {
+    pub const fn build(&self) -> &BuildConfig<'a> {
+        &self.build
+    }
+
+    pub const fn styles(&self) -> &StyleConfig<'a> {
+        &self.styles
+    }
+
+    pub const fn feed(&self) -> Option<&FeedConfig<'a>> {
+        self.feed.as_ref()
+    }
+}
+
+impl Default for SiteConfig<'_> {
+    fn default() -> Self {
+        SiteConfigBuilder::default().build()
+    }
+}
+
+#[derive(Default)]
+pub struct SiteConfigBuilder<'a> {
+    build: Option<BuildConfig<'a>>,
+    styles: Option<StyleConfig<'a>>,
+    feed: Option<FeedConfig<'a>>,
+}
+
+impl<'a> SiteConfigBuilder<'a> {
+    pub fn build(self) -> SiteConfig<'a> {
+        SiteConfig {
+            build: self.build.unwrap_or_default(),
+            styles: self.styles.unwrap_or_default(),
+            feed: self.feed,
+        }
+    }
+}
+
 impl<'a> FromKeyValueBlock<'a> for SiteConfig<'a> {
-    type Builder = SiteConfigBuilder<'a>;
+    type Builder = SiteConfigBlockBuilder<'a>;
 }
 
 enum SiteConfigKey {
+    In,
+    Out,
+    Blocks,
+    Drafts,
+    Stylesheet,
+    WrapperId,
     Author,
     Host,
-    Source,
-    Target,
     Title,
     Url,
 }
@@ -489,10 +621,14 @@ enum SiteConfigKey {
 impl SiteConfigKey {
     const fn as_str(&self) -> &str {
         match self {
+            Self::In => "in",
+            Self::Out => "out",
+            Self::Blocks => "blocks",
+            Self::Drafts => "drafts",
+            Self::Stylesheet => "stylesheet",
+            Self::WrapperId => "wrapper_id",
             Self::Author => "author",
             Self::Host => "host",
-            Self::Source => "source",
-            Self::Target => "target",
             Self::Title => "title",
             Self::Url => "url",
         }
@@ -504,10 +640,14 @@ impl FromStr for SiteConfigKey {
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         Ok(match s {
+            "in" => Self::In,
+            "out" => Self::Out,
+            "blocks" => Self::Blocks,
+            "drafts" => Self::Drafts,
+            "stylesheet" => Self::Stylesheet,
+            "wrapper_id" => Self::WrapperId,
             "author" => Self::Author,
             "host" => Self::Host,
-            "source" => Self::Source,
-            "target" => Self::Target,
             "title" => Self::Title,
             "url" => Self::Url,
             _ => return Err(()),
@@ -522,16 +662,20 @@ impl std::fmt::Display for SiteConfigKey {
 }
 
 #[derive(Default)]
-struct SiteConfigBuilder<'a> {
-    source: Option<&'a str>,
-    target: Option<&'a str>,
+struct SiteConfigBlockBuilder<'a> {
+    r#in: Option<&'a str>,
+    out: Option<&'a str>,
+    blocks: Option<&'a str>,
+    drafts: Option<&'a str>,
+    stylesheet: Option<&'a str>,
+    wrapper_id: Option<&'a str>,
     title: Option<&'a str>,
     author: Option<&'a str>,
     host: Option<&'a str>,
     url: Option<&'a str>,
 }
 
-impl<'a> SiteConfigBuilder<'a> {
+impl<'a> SiteConfigBlockBuilder<'a> {
     fn set_once<T>(field: &mut Option<T>, key: &SiteConfigKey, val: T) -> Result<(), ParseKeyValueBlockKind> {
         if field.is_some() {
             return Err(ParseKeyValueBlockKind::DuplicateKey(key.to_string()));
@@ -542,49 +686,72 @@ impl<'a> SiteConfigBuilder<'a> {
 
     fn set(&mut self, key: &SiteConfigKey, val: &'a str) -> Result<(), ParseKeyValueBlockKind> {
         match key {
+            SiteConfigKey::In => Self::set_once(&mut self.r#in, key, val),
+            SiteConfigKey::Out => Self::set_once(&mut self.out, key, val),
+            SiteConfigKey::Blocks => Self::set_once(&mut self.blocks, key, val),
+            SiteConfigKey::Drafts => Self::set_once(&mut self.drafts, key, val),
+            SiteConfigKey::Stylesheet => Self::set_once(&mut self.stylesheet, key, val),
+            SiteConfigKey::WrapperId => Self::set_once(&mut self.wrapper_id, key, val),
+
             SiteConfigKey::Author => Self::set_once(&mut self.author, key, val),
             SiteConfigKey::Host => Self::set_once(&mut self.host, key, val),
-            SiteConfigKey::Source => Self::set_once(&mut self.source, key, val),
-            SiteConfigKey::Target => Self::set_once(&mut self.target, key, val),
             SiteConfigKey::Title => Self::set_once(&mut self.title, key, val),
             SiteConfigKey::Url => Self::set_once(&mut self.url, key, val),
         }
     }
 
     fn build(self) -> Result<SiteConfig<'a>, ParseKeyValueBlockKind> {
-        Ok(SiteConfig {
-            author: self
-                .author
-                .ok_or_else(|| ParseKeyValueBlockKind::MissingRequiredKey(SiteConfigKey::Author.to_string()))?,
-            host: self
-                .host
-                .ok_or_else(|| ParseKeyValueBlockKind::MissingRequiredKey(SiteConfigKey::Host.to_string()))?,
-            source: self
-                .source
-                .ok_or_else(|| ParseKeyValueBlockKind::MissingRequiredKey(SiteConfigKey::Source.to_string()))?,
-            target: self
-                .target
-                .ok_or_else(|| ParseKeyValueBlockKind::MissingRequiredKey(SiteConfigKey::Target.to_string()))?,
-            title: self
-                .title
-                .ok_or_else(|| ParseKeyValueBlockKind::MissingRequiredKey(SiteConfigKey::Title.to_string()))?,
-            url: self
-                .url
-                .ok_or_else(|| ParseKeyValueBlockKind::MissingRequiredKey(SiteConfigKey::Url.to_string()))?,
-        })
+        let build_defaults = BuildConfig::default();
+        let style_defaults = StyleConfig::default();
+        let feed = if [self.author, self.host, self.title, self.url]
+            .iter()
+            .any(Option::is_some)
+        {
+            Some(FeedConfig {
+                author: self
+                    .author
+                    .ok_or_else(|| ParseKeyValueBlockKind::MissingRequiredKey(SiteConfigKey::Author.to_string()))?,
+                host: self
+                    .host
+                    .ok_or_else(|| ParseKeyValueBlockKind::MissingRequiredKey(SiteConfigKey::Host.to_string()))?,
+                title: self
+                    .title
+                    .ok_or_else(|| ParseKeyValueBlockKind::MissingRequiredKey(SiteConfigKey::Title.to_string()))?,
+                url: self
+                    .url
+                    .ok_or_else(|| ParseKeyValueBlockKind::MissingRequiredKey(SiteConfigKey::Url.to_string()))?,
+            })
+        } else {
+            None
+        };
+
+        Ok(SiteConfigBuilder {
+            build: Some(BuildConfig {
+                r#in: self.r#in.unwrap_or(build_defaults.r#in),
+                out: self.out.unwrap_or(build_defaults.out),
+                blocks: self.blocks.unwrap_or(build_defaults.blocks),
+                drafts: self.drafts.unwrap_or(build_defaults.drafts),
+            }),
+            styles: Some(StyleConfig {
+                stylesheet: self.stylesheet.unwrap_or(style_defaults.stylesheet),
+                wrapper_id: self.wrapper_id.unwrap_or(style_defaults.wrapper_id),
+            }),
+            feed,
+        }
+        .build())
     }
 }
 
-impl<'a> KeyValueBlockBuilder<'a> for SiteConfigBuilder<'a> {
+impl<'a> KeyValueBlockBuilder<'a> for SiteConfigBlockBuilder<'a> {
     type Key = SiteConfigKey;
     type Output = SiteConfig<'a>;
 
     fn set(&mut self, key: &Self::Key, val: &'a str) -> Result<(), ParseKeyValueBlockKind> {
-        SiteConfigBuilder::set(self, key, val)
+        SiteConfigBlockBuilder::set(self, key, val)
     }
 
     fn build(self) -> Result<Self::Output, ParseKeyValueBlockKind> {
-        SiteConfigBuilder::build(self)
+        SiteConfigBlockBuilder::build(self)
     }
 }
 
@@ -652,7 +819,7 @@ pub fn escape_html(s: &str) -> impl fmt::Display + '_ {
     })
 }
 
-fn render_head(page: &Page, blocks: &Blocks) -> String {
+fn render_head(page: &Page, blocks: &Blocks, styles: &str) -> String {
     let headers = &page.headers;
     let escaped_title = escape_html(headers.title());
 
@@ -662,7 +829,10 @@ fn render_head(page: &Page, blocks: &Blocks) -> String {
         .unwrap_or_default();
 
     let style_link = if headers.include_styles() {
-        format!("<link href=\"{DEFAULT_STYLESHEET}\" rel=\"stylesheet\" type=\"text/css\"/>\n")
+        format!(
+            "<link href=\"{}\" rel=\"stylesheet\" type=\"text/css\"/>\n",
+            escape_html(styles)
+        )
     } else {
         String::new()
     };
@@ -722,7 +892,8 @@ fn render_content(page: &Page) -> String {
     }
 }
 
-pub fn render_page(page: &Page, blocks: &Blocks) -> String {
+pub fn render_page(page: &Page, blocks: &Blocks, config: &SiteConfig) -> String {
+    let wrapper_id = escape_html(config.styles().wrapper_id());
     let headers = &page.headers;
 
     let class_attr = headers
@@ -742,7 +913,7 @@ pub fn render_page(page: &Page, blocks: &Blocks) -> String {
         ""
     };
 
-    let head = render_head(page, blocks);
+    let head = render_head(page, blocks, config.styles().stylesheet());
     let content = render_content(page);
 
     // Indentation is only for the convencience of the reader of this __source code__;
@@ -752,7 +923,7 @@ pub fn render_page(page: &Page, blocks: &Blocks) -> String {
          <html lang=\"en\">\n\
              {head}\
              <body>\n\
-                 <div id=\"{DEFAULT_WRAP_ID}\"{class_attr}>\n\
+                 <div id=\"{wrapper_id}\"{class_attr}>\n\
                      {header}\
                      <main>\n\
                          <!-- content start -->\n\
@@ -766,10 +937,10 @@ pub fn render_page(page: &Page, blocks: &Blocks) -> String {
     )
 }
 
-pub fn write_page(page: &Page, blocks: &Blocks) -> Result<(), Error> {
-    let out_path = Path::new(OUT_DIR).join(&page.path);
+pub fn write_page(page: &Page, blocks: &Blocks, config: &SiteConfig) -> Result<(), Error> {
+    let out_path = Path::new(config.build().out()).join(&page.path);
 
-    fs::write(&out_path, render_page(page, blocks)).at_path(&out_path)
+    fs::write(&out_path, render_page(page, blocks, config)).at_path(&out_path)
 }
 
 // pub fn build_feed(pages: Vec<Page>) -> Result<(), Error> {
@@ -886,15 +1057,11 @@ pub enum Error {
         path: Option<PathBuf>,
         source: io::Error,
     },
-    ParsePageHeader {
-        path: PathBuf,
-        source: ParseKeyValueBlockError,
-    },
-    ReadPageHeader {
+    ReadPage {
         path: PathBuf,
         source: ReadPageError,
     },
-    ParseSiteConfig {
+    ParseKeyValueBlock {
         path: PathBuf,
         source: ParseKeyValueBlockError,
     },
@@ -907,17 +1074,14 @@ pub enum Error {
 impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::Io { path: Some(path), .. } | Self::ReadPageHeader { path, .. } | Self::ReadBlock { path, .. } => {
-                write!(f, "{}", path.display())
-            }
             Self::Io { path: None, .. } => {
                 write!(f, "I/O error")
             }
-            Self::ParsePageHeader { path, source } => {
+            Self::ParseKeyValueBlock { path, source } => {
                 write!(f, "{}:{}", path.display(), source.line)
             }
-            Self::ParseSiteConfig { path, source } => {
-                write!(f, "{}:{}", path.display(), source.line)
+            Self::Io { path: Some(path), .. } | Self::ReadPage { path, .. } | Self::ReadBlock { path, .. } => {
+                write!(f, "{}", path.display())
             }
         }
     }
@@ -927,9 +1091,8 @@ impl std::error::Error for Error {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
             Self::Io { source, .. } => Some(source),
-            Self::ReadPageHeader { source, .. } => Some(source),
-            Self::ParsePageHeader { source, .. } => Some(source),
-            Self::ParseSiteConfig { source, .. } => Some(source),
+            Self::ParseKeyValueBlock { source, .. } => Some(source),
+            Self::ReadPage { source, .. } => Some(source),
             Self::ReadBlock { source, .. } => Some(source),
         }
     }
@@ -981,7 +1144,7 @@ impl std::error::Error for ReadPageError {}
 
 impl WithPath for ReadPageError {
     fn with_path(self, path: PathBuf) -> Error {
-        Error::ReadPageHeader { path, source: self }
+        Error::ReadPage { path, source: self }
     }
 }
 
@@ -1033,7 +1196,7 @@ impl std::error::Error for ParseKeyValueBlockError {}
 
 impl WithPath for ParseKeyValueBlockError {
     fn with_path(self, path: PathBuf) -> Error {
-        Error::ParsePageHeader { path, source: self }
+        Error::ParseKeyValueBlock { path, source: self }
     }
 }
 
@@ -1071,6 +1234,27 @@ impl From<ParseKeyValuePairError> for ParseKeyValueBlockKind {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn site_config() -> SiteConfig<'static> {
+        SiteConfig {
+            build: BuildConfig {
+                r#in: "in",
+                out: "out",
+                blocks: "blocks",
+                drafts: "drafts",
+            },
+            styles: StyleConfig {
+                stylesheet: "/style.css",
+                wrapper_id: "wrap",
+            },
+            feed: Some(FeedConfig {
+                author: "Example Author",
+                host: "example.com",
+                title: "Example Site",
+                url: "https://example.com",
+            }),
+        }
+    }
 
     mod split_page {
         use super::*;
@@ -1676,6 +1860,101 @@ mod tests {
         }
     }
 
+    mod parse_config {
+        use super::*;
+        use indoc::indoc;
+
+        const CONFIG: &str = indoc! {"
+            in: content
+            out: public
+            blocks: fragments
+            drafts: unpublished
+            stylesheet: /assets/site.css
+            wrapper_id: site-content
+            author: Example Author
+            host: example.com
+            title: Example Site
+            url: https://example.com
+        "};
+
+        #[test]
+        fn absent_settings_use_defaults() {
+            for config in [
+                SiteConfig::default(),
+                parse_config("").unwrap(),
+                parse_config("\n  \n").unwrap(),
+            ] {
+                assert_eq!(config.build().r#in(), "in");
+                assert_eq!(config.build().out(), "out");
+                assert_eq!(config.build().blocks(), "blocks");
+                assert_eq!(config.build().drafts(), "drafts");
+                assert_eq!(config.styles().stylesheet(), "style.css");
+                assert_eq!(config.styles().wrapper_id(), "content");
+                assert!(config.feed().is_none());
+            }
+        }
+
+        #[test]
+        fn partial_settings_override_only_supplied_values() {
+            let config = parse_config("out: public\nstylesheet: /assets/site.css\n").unwrap();
+
+            assert_eq!(config.build().r#in(), "in");
+            assert_eq!(config.build().out(), "public");
+            assert_eq!(config.build().blocks(), "blocks");
+            assert_eq!(config.build().drafts(), "drafts");
+            assert_eq!(config.styles().stylesheet(), "/assets/site.css");
+            assert_eq!(config.styles().wrapper_id(), "content");
+            assert!(config.feed().is_none());
+        }
+
+        #[test]
+        fn preserves_complete_config() {
+            let config = parse_config(CONFIG).unwrap();
+
+            assert_eq!(config.build().r#in(), "content");
+            assert_eq!(config.build().out(), "public");
+            assert_eq!(config.build().blocks(), "fragments");
+            assert_eq!(config.build().drafts(), "unpublished");
+            assert_eq!(config.styles().stylesheet(), "/assets/site.css");
+            assert_eq!(config.styles().wrapper_id(), "site-content");
+            let feed = config.feed().unwrap();
+            assert_eq!(feed.author(), "Example Author");
+            assert_eq!(feed.host(), "example.com");
+            assert_eq!(feed.title(), "Example Site");
+            assert_eq!(feed.url(), "https://example.com");
+        }
+
+        #[test]
+        fn partial_feed_reports_missing_metadata() {
+            for key in ["author", "host", "title", "url"] {
+                let text = CONFIG
+                    .lines()
+                    .filter(|line| !line.starts_with(&format!("{key}:")))
+                    .collect::<Vec<_>>()
+                    .join("\n");
+
+                assert!(matches!(
+                    parse_config(&text),
+                    Err(ParseKeyValueBlockError {
+                        kind: ParseKeyValueBlockKind::MissingRequiredKey(missing),
+                        ..
+                    }) if missing == key
+                ));
+            }
+        }
+
+        #[test]
+        fn defaults_do_not_hide_duplicate_settings() {
+            assert!(matches!(
+                parse_config("out: public\nout: other\n"),
+                Err(ParseKeyValueBlockError {
+                    line: 2,
+                    kind: ParseKeyValueBlockKind::DuplicateKey(key),
+                }) if key == "out"
+            ));
+        }
+    }
+
     mod blocks {
         use super::*;
 
@@ -1762,7 +2041,7 @@ mod tests {
         }
 
         fn render(page: &Page) -> String {
-            render_page(page, &Blocks::default())
+            render_page(page, &Blocks::default(), &site_config())
         }
 
         fn render_with(page: &Page, blocks: impl IntoIterator<Item = (BlockKind, &'static str)>) -> String {
@@ -1771,7 +2050,7 @@ mod tests {
                 collected.insert(Block::new(kind, content.to_owned()).expect("block content to be non-empty"));
             }
 
-            render_page(page, &collected)
+            render_page(page, &collected, &site_config())
         }
 
         fn page_headers() -> PageHeaders {
@@ -1913,7 +2192,8 @@ mod tests {
 
             assert!(
                 page.contains(&format!(
-                    "<div id=\"{DEFAULT_WRAP_ID}\" class=\"class with escaped &lt;, &gt;, &amp;, &quot; and &#39;\">"
+                    "<div id=\"{id}\" class=\"class with escaped &lt;, &gt;, &amp;, &quot; and &#39;\">",
+                    id = site_config().styles().wrapper_id()
                 )),
                 "got {page}"
             );
@@ -2001,7 +2281,8 @@ mod tests {
             assert!(!page.contains("<h1>"), "got {page}");
             assert!(
                 !page.contains(&format!(
-                    "<link href=\"{DEFAULT_STYLESHEET}\" rel=\"stylesheet\" type=\"text/css\"/>"
+                    "<link href=\"{styles}\" rel=\"stylesheet\" type=\"text/css\"/>",
+                    styles = site_config().styles().stylesheet()
                 )),
                 "got {page}"
             );
@@ -2030,7 +2311,8 @@ mod tests {
             assert!(!page.contains("<article>"), "got {page}");
             assert!(
                 page.contains(&format!(
-                    "<link href=\"{DEFAULT_STYLESHEET}\" rel=\"stylesheet\" type=\"text/css\"/>"
+                    "<link href=\"{styles}\" rel=\"stylesheet\" type=\"text/css\"/>",
+                    styles = site_config().styles().stylesheet()
                 )),
                 "got {page}"
             );
@@ -2077,7 +2359,10 @@ mod tests {
 
             // nothing may be rendered between the wrapper and <main>
             assert!(
-                page.contains(&format!("<div id=\"{DEFAULT_WRAP_ID}\">\n<main>\n")),
+                page.contains(&format!(
+                    "<div id=\"{id}\">\n<main>\n",
+                    id = site_config().styles().wrapper_id()
+                )),
                 "got {page}"
             );
             assert!(page.contains("</main>\n</div>\n"), "got {page}");
@@ -2105,7 +2390,8 @@ mod tests {
 
             assert!(
                 page.contains(&format!(
-                    "<div id=\"{DEFAULT_WRAP_ID}\">\n<nav>site nav</nav>\n<main>\n"
+                    "<div id=\"{id}\">\n<nav>site nav</nav>\n<main>\n",
+                    id = site_config().styles().wrapper_id()
                 )),
                 "got {page}"
             );

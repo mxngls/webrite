@@ -3,36 +3,39 @@ use std::{fs, process};
 
 mod page;
 
-use crate::page::{
-    BLOCK_DIR, Blocks, DRAFT_DIR, Error, IN_DIR, OUT_DIR, Page, PathContext, SiteConfig, parse_kv_block, split_page,
-    write_page,
-};
+static CONFIG_PATH: &str = "webrite.txt";
 
-fn build_page(page_path: &Path, blocks: &Blocks) -> Result<Page, Error> {
+use crate::page::{Blocks, Error, Page, PathContext, SiteConfig, parse_config, parse_headers, split_page, write_page};
+
+fn build_page(page_path: &Path, blocks: &Blocks, config: &SiteConfig) -> Result<Page, Error> {
     let page_str = fs::read_to_string(page_path).at_path(page_path)?;
 
     let (headers, body) = split_page(&page_str).at_path(page_path)?;
-    let headers = parse_kv_block(headers).at_path(page_path)?;
+    let headers = parse_headers(headers).at_path(page_path)?;
 
     let rel_path = page_path
-        .strip_prefix(IN_DIR)
+        .strip_prefix(config.build().r#in())
         .expect("file paths descend from the input directory");
 
     let page = Page::new(rel_path.to_path_buf(), headers, body.to_string());
 
-    write_page(&page, blocks)?;
+    write_page(&page, blocks, config)?;
 
     Ok(page)
 }
 
-fn build_site(input_dir: &Path) -> Result<(), Error> {
-    let blocks = Blocks::from_dir(&input_dir.join(BLOCK_DIR))?;
+fn build_site(config_path: &Path) -> Result<(), Error> {
+    let config_str = match fs::read_to_string(config_path) {
+        Ok(config_str) => config_str,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => String::new(),
+        Err(error) => return Err(error).at_path(config_path),
+    };
+    let config = parse_config(&config_str).at_path(config_path)?;
 
-    let config_path = Path::new("webrite.txt");
-    let config_str = fs::read_to_string(config_path).at_path(config_path)?;
-    // TODO: Use config
-    let _config = parse_kv_block::<SiteConfig>(&config_str).at_path(config_path)?;
-    let mut dir_stack = vec![input_dir.to_path_buf()];
+    let in_path = Path::new(config.build().r#in());
+    let blocks = Blocks::from_dir(&in_path.to_path_buf().join(config.build().blocks()))?;
+
+    let mut dir_stack = vec![in_path.to_path_buf()];
 
     while let Some(dir) = dir_stack.pop() {
         for entry in fs::read_dir(&dir).at_path(&dir)? {
@@ -45,19 +48,19 @@ fn build_site(input_dir: &Path) -> Result<(), Error> {
             }
 
             let rel_path = path
-                .strip_prefix(input_dir)
+                .strip_prefix(config.build().r#in())
                 .expect("paths descend from the input directory");
-            let out_dir = Path::new(OUT_DIR).join(rel_path);
+            let out_dir = Path::new(config.build().out()).join(rel_path);
 
             if typ.is_dir() {
                 let dir_name = entry.file_name();
-                if dir_name == DRAFT_DIR || dir_name == BLOCK_DIR {
+                if dir_name == config.build().drafts() || dir_name == config.build().blocks() {
                     continue;
                 }
                 fs::create_dir_all(&out_dir).at_path(&out_dir)?;
                 dir_stack.push(path);
             } else if path.extension().is_some_and(|ext| ext == "htm") {
-                build_page(&path, &blocks)?;
+                build_page(&path, &blocks, &config)?;
             } else {
                 fs::copy(&path, &out_dir).at_path(&out_dir)?;
             }
@@ -68,8 +71,7 @@ fn build_site(input_dir: &Path) -> Result<(), Error> {
 }
 
 fn main() -> process::ExitCode {
-    let content_dir = Path::new(&IN_DIR);
-    match build_site(content_dir) {
+    match build_site(Path::new(CONFIG_PATH)) {
         Ok(()) => process::ExitCode::SUCCESS,
         Err(e) => {
             eprintln!("error: {e}");
