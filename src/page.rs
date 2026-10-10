@@ -70,34 +70,228 @@ fn parse_kv_line(line: &str) -> Result<Option<(&str, &str)>, ParseKeyValuePairEr
 }
 
 #[derive(Debug)]
-pub struct Page {
+pub struct Page<H = PageHeaders> {
     path: PathBuf,
-    headers: PageHeaders,
+    headers: H,
     body: String,
 }
 
-impl Page {
-    pub const fn new(path: PathBuf, headers: PageHeaders, body: String) -> Self {
+#[derive(Debug)]
+pub enum PageHeaders {
+    NonPost(NonPostHeaders),
+    Post(PostHeaders),
+}
+
+#[derive(Debug)]
+pub struct NonPostHeaders {
+    common: CommonHeaders,
+
+    // non-posts don't require special treatmeant
+    description: Option<String>,
+    created_at: Option<String>,
+}
+
+#[derive(Debug)]
+pub struct PostHeaders {
+    common: CommonHeaders,
+
+    // while posts do
+    description: String,
+    created_at: String,
+}
+
+pub type Post = Page<PostHeaders>;
+
+// Forward common getters without exposing the header representation.
+#[cfg_attr(not(test), expect(dead_code, reason = "Some getters not used yet"))]
+impl PageHeaders {
+    const fn common(&self) -> &CommonHeaders {
+        match self {
+            Self::Post(headers) => &headers.common,
+            Self::NonPost(headers) => &headers.common,
+        }
+    }
+
+    pub const fn is_post(&self) -> bool {
+        matches!(self, Self::Post(_))
+    }
+
+    pub fn description(&self) -> Option<&str> {
+        match self {
+            Self::Post(headers) => Some(headers.description()),
+            Self::NonPost(headers) => headers.description(),
+        }
+    }
+
+    pub fn created_at(&self) -> Option<&str> {
+        match self {
+            Self::Post(headers) => Some(headers.created_at()),
+            Self::NonPost(headers) => headers.created_at(),
+        }
+    }
+
+    // common headers
+    pub fn title(&self) -> &str {
+        self.common().title()
+    }
+    pub fn css_classes(&self) -> Option<&str> {
+        self.common().css_classes()
+    }
+    pub fn css_stylesheet(&self) -> Option<&str> {
+        self.common().css_stylesheet()
+    }
+    pub const fn include_header(&self) -> bool {
+        self.common().include_header()
+    }
+    pub const fn include_footer(&self) -> bool {
+        self.common().include_footer()
+    }
+    pub const fn include_title(&self) -> bool {
+        self.common().include_title()
+    }
+    pub const fn include_styles(&self) -> bool {
+        self.common().include_styles()
+    }
+}
+
+// Forward common getters without exposing the header representation.
+#[expect(dead_code, reason = "Some getters not used yet")]
+impl PostHeaders {
+    pub fn description(&self) -> &str {
+        self.description.as_ref()
+    }
+    pub const fn created_at(&self) -> &str {
+        self.created_at.as_str()
+    }
+
+    // common headers
+    pub fn title(&self) -> &str {
+        self.common.title()
+    }
+    pub fn css_classes(&self) -> Option<&str> {
+        self.common.css_classes()
+    }
+    pub fn css_stylesheet(&self) -> Option<&str> {
+        self.common.css_stylesheet()
+    }
+    pub const fn include_header(&self) -> bool {
+        self.common.include_header()
+    }
+    pub const fn include_footer(&self) -> bool {
+        self.common.include_footer()
+    }
+    pub const fn include_title(&self) -> bool {
+        self.common.include_title()
+    }
+    pub const fn include_styles(&self) -> bool {
+        self.common.include_styles()
+    }
+}
+
+// Forward common getters without exposing the header representation.
+#[expect(dead_code, reason = "Some getters not used yet")]
+impl NonPostHeaders {
+    pub fn description(&self) -> Option<&str> {
+        self.description.as_deref()
+    }
+    pub fn created_at(&self) -> Option<&str> {
+        self.created_at.as_deref()
+    }
+
+    // common headers
+    pub fn title(&self) -> &str {
+        self.common.title()
+    }
+    pub fn css_classes(&self) -> Option<&str> {
+        self.common.css_classes()
+    }
+    pub fn css_stylesheet(&self) -> Option<&str> {
+        self.common.css_stylesheet()
+    }
+    pub const fn include_header(&self) -> bool {
+        self.common.include_header()
+    }
+    pub const fn include_footer(&self) -> bool {
+        self.common.include_footer()
+    }
+    pub const fn include_title(&self) -> bool {
+        self.common.include_title()
+    }
+    pub const fn include_styles(&self) -> bool {
+        self.common.include_styles()
+    }
+}
+
+impl<H> Page<H> {
+    pub const fn new(path: PathBuf, headers: H, body: String) -> Self {
         Self { path, headers, body }
+    }
+
+    pub const fn headers(&self) -> &H {
+        &self.headers
+    }
+    pub fn path(&self) -> &Path {
+        &self.path
+    }
+    pub fn body(&self) -> &str {
+        &self.body
+    }
+}
+
+impl Page<PageHeaders> {
+    pub fn into_post(self) -> Option<Post> {
+        let Self { path, headers, body } = self;
+        let PageHeaders::Post(headers) = headers else {
+            return None;
+        };
+
+        Some(Page::new(path, headers, body))
     }
 }
 
 #[allow(clippy::struct_excessive_bools)]
 #[derive(Debug)]
-pub struct PageHeaders {
+struct CommonHeaders {
     title: String,
-    description: Option<String>,
-
-    created_at: Option<String>,
 
     css_classes: Option<String>,
     css_stylesheet: Option<String>,
 
-    is_post: bool,
     include_header: bool,
     include_footer: bool,
     include_title: bool,
     include_styles: bool,
+}
+
+// getters-only impl
+impl CommonHeaders {
+    pub fn title(&self) -> &str {
+        &self.title
+    }
+
+    pub fn css_classes(&self) -> Option<&str> {
+        self.css_classes.as_deref()
+    }
+
+    pub fn css_stylesheet(&self) -> Option<&str> {
+        self.css_stylesheet.as_deref()
+    }
+
+    pub const fn include_header(&self) -> bool {
+        self.include_header
+    }
+
+    pub const fn include_footer(&self) -> bool {
+        self.include_footer
+    }
+
+    pub const fn include_title(&self) -> bool {
+        self.include_title
+    }
+
+    pub const fn include_styles(&self) -> bool {
+        self.include_styles
+    }
 }
 
 impl<'a> FromKeyValueBlock<'a> for PageHeaders {
@@ -170,12 +364,9 @@ impl std::fmt::Display for HeaderKey {
 struct PageHeadersBuilder<'a> {
     title: Option<&'a str>,
     description: Option<&'a str>,
-
     created_at: Option<&'a str>,
-
     css_classes: Option<&'a str>,
     css_stylesheet: Option<&'a str>,
-
     is_post: Option<bool>,
     include_header: Option<bool>,
     include_footer: Option<bool>,
@@ -221,45 +412,42 @@ impl<'a> PageHeadersBuilder<'a> {
 
     fn build(self) -> Result<PageHeaders, ParseKeyValueBlockKind> {
         let is_post = self.is_post.unwrap_or(true);
-        let description = if is_post {
-            Some(
-                self.description
-                    .ok_or_else(|| ParseKeyValueBlockKind::MissingRequiredKey(HeaderKey::Description.to_string()))?
-                    .to_owned(),
-            )
-        } else {
-            self.description.map(str::to_owned)
-        };
         let title = self
             .title
             .ok_or_else(|| ParseKeyValueBlockKind::MissingRequiredKey(HeaderKey::Title.to_string()))?;
-        let created_at = if is_post {
-            Some(
-                self.created_at
-                    .ok_or_else(|| ParseKeyValueBlockKind::MissingRequiredKey(HeaderKey::CreatedAt.to_string()))?
-                    .to_owned(),
-            )
-        } else {
-            self.created_at.map(str::to_owned)
-        };
-
-        Ok(PageHeaders {
-            // required
+        let common = CommonHeaders {
             title: title.to_string(),
-            description,
-
-            created_at,
-
             css_classes: self.css_classes.map(str::to_owned),
             css_stylesheet: self.css_stylesheet.map(str::to_owned),
             include_header: self.include_header.unwrap_or(true),
             include_footer: self.include_footer.unwrap_or(true),
 
-            is_post,
             // post overrides
             include_title: self.include_title.unwrap_or(is_post),
             include_styles: self.include_styles.unwrap_or(is_post),
-        })
+        };
+
+        if is_post {
+            let description = self
+                .description
+                .ok_or_else(|| ParseKeyValueBlockKind::MissingRequiredKey(HeaderKey::Description.to_string()))?;
+
+            let created_at = self
+                .created_at
+                .ok_or_else(|| ParseKeyValueBlockKind::MissingRequiredKey(HeaderKey::CreatedAt.to_string()))?;
+
+            Ok(PageHeaders::Post(PostHeaders {
+                common,
+                description: description.to_owned(),
+                created_at: created_at.to_owned(),
+            }))
+        } else {
+            Ok(PageHeaders::NonPost(NonPostHeaders {
+                common,
+                description: self.description.map(str::to_owned),
+                created_at: self.created_at.map(str::to_owned),
+            }))
+        }
     }
 }
 
@@ -466,21 +654,20 @@ pub fn escape_html(s: &str) -> impl fmt::Display + '_ {
 
 fn render_head(page: &Page, blocks: &Blocks) -> String {
     let headers = &page.headers;
-    let escaped_title = escape_html(&headers.title);
+    let escaped_title = escape_html(headers.title());
 
     let description_meta = headers
-        .description
-        .as_ref()
+        .description()
         .map(|d| format!("<meta name=\"description\" content=\"{}\">\n", escape_html(d)))
         .unwrap_or_default();
 
-    let style_link = if headers.include_styles {
+    let style_link = if headers.include_styles() {
         format!("<link href=\"{DEFAULT_STYLESHEET}\" rel=\"stylesheet\" type=\"text/css\"/>\n")
     } else {
         String::new()
     };
 
-    let custom_style_link = headers.css_stylesheet.as_ref().map_or_else(String::new, |s| {
+    let custom_style_link = headers.css_stylesheet().map_or_else(String::new, |s| {
         format!(
             "<link href=\"{}\" rel=\"stylesheet\" type=\"text/css\"/>\n",
             escape_html(s)
@@ -520,15 +707,15 @@ fn render_head(page: &Page, blocks: &Blocks) -> String {
 
 fn render_content(page: &Page) -> String {
     let body = &page.body;
-    let heading = if page.headers.include_title {
-        format!("<h1>{}</h1>\n", escape_html(&page.headers.title))
+    let heading = if page.headers.include_title() {
+        format!("<h1>{}</h1>\n", escape_html(page.headers.title()))
     } else {
         String::new()
     };
 
     let content = format!("{heading}{body}\n");
 
-    if page.headers.is_post {
+    if page.headers.is_post() {
         format!("<article>\n{content}</article>\n")
     } else {
         content
@@ -539,18 +726,17 @@ pub fn render_page(page: &Page, blocks: &Blocks) -> String {
     let headers = &page.headers;
 
     let class_attr = headers
-        .css_classes
-        .as_ref()
+        .css_classes()
         .map(|c| format!(" class=\"{}\"", escape_html(c)))
         .unwrap_or_default();
 
-    let header = if headers.include_header {
+    let header = if headers.include_header() {
         blocks.header.as_deref().unwrap_or("<!-- header -->\n")
     } else {
         ""
     };
 
-    let footer = if headers.include_footer {
+    let footer = if headers.include_footer() {
         blocks.footer.as_deref().unwrap_or("<!-- footer -->\n")
     } else {
         ""
@@ -586,10 +772,14 @@ pub fn write_page(page: &Page, blocks: &Blocks) -> Result<(), Error> {
     fs::write(&out_path, render_page(page, blocks)).at_path(&out_path)
 }
 
-// pub fn render_feed(page: &Page) -> Result<(), Error> -> {
+// pub fn build_feed(pages: Vec<Page>) -> Result<(), Error> {
+//     Ok(())
+// }
+
+// fn render_feed(page: &Page) -> Result<(), Error> -> {
 // }
 //
-// pub fn write_feed(page: &Page) -> Result<(), Error> -> {
+// fn write_feed(page: &Page) -> Result<(), Error> -> {
 // }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1021,6 +1211,84 @@ mod tests {
         }
     }
 
+    #[test]
+    fn into_post_preserves_page_content() {
+        let headers =
+            parse_kv_block::<PageHeaders>("title: Example\ndescription: Example description\ncreated_at: 2026-06-26\n")
+                .unwrap();
+        let page = Page::new(PathBuf::from("posts/example.htm"), headers, "<p>Body</p>".to_owned());
+
+        let post: Post = page.into_post().unwrap();
+
+        assert_eq!(post.path(), Path::new("posts/example.htm"));
+        assert_eq!(post.body(), "<p>Body</p>");
+        assert_eq!(post.headers().title(), "Example");
+        assert_eq!(post.headers().description(), "Example description");
+        assert_eq!(post.headers().created_at(), "2026-06-26");
+    }
+
+    #[test]
+    fn into_post_excludes_nonposts_with_dates() {
+        let headers = parse_kv_block::<PageHeaders>(
+            "title: Example\ndescription: Example description\ncreated_at: 2026-06-26\nis_post: no\n",
+        )
+        .unwrap();
+        let page = Page::new(PathBuf::from("example.htm"), headers, "<p>Body</p>".to_owned());
+
+        assert!(page.into_post().is_none());
+    }
+
+    mod post_sorting {
+        use super::*;
+
+        fn post(title: &str, created_at: &str) -> Post {
+            let headers = PageHeadersBuilder {
+                title: Some(title),
+                description: Some("Example description"),
+                created_at: Some(created_at),
+                ..Default::default()
+            }
+            .build()
+            .unwrap();
+
+            Page::new(PathBuf::from("example.htm"), headers, "<p>Body</p>".to_owned())
+                .into_post()
+                .unwrap()
+        }
+
+        #[test]
+        fn sorts_posts_by_creation_date() {
+            let mut posts = [
+                post("Latest", "2026-07-01"),
+                post("Earliest", "2025-12-31"),
+                post("Middle", "2026-01-01"),
+            ];
+
+            posts.sort_by(|a, b| a.headers().created_at().cmp(b.headers().created_at()));
+
+            assert_eq!(
+                posts.each_ref().map(|post| post.headers().title()),
+                ["Earliest", "Middle", "Latest"]
+            );
+        }
+
+        #[test]
+        fn equal_creation_dates_preserve_post_order() {
+            let mut posts = [
+                post("First", "2026-07-01"),
+                post("Second", "2026-07-01"),
+                post("Third", "2026-07-01"),
+            ];
+
+            posts.sort_by(|a, b| a.headers().created_at().cmp(b.headers().created_at()));
+
+            assert_eq!(
+                posts.each_ref().map(|post| post.headers().title()),
+                ["First", "Second", "Third"]
+            );
+        }
+    }
+
     mod parse_headers {
         use super::*;
         use indoc::indoc;
@@ -1035,19 +1303,75 @@ mod tests {
 
             let headers = parse_kv_block::<PageHeaders>(header_str).unwrap();
 
-            assert_eq!(headers.title, "Example", "got {:?}", headers.title);
+            let PageHeaders::Post(headers) = headers else {
+                panic!("pages default to posts");
+            };
+
+            assert_eq!(headers.title(), "Example", "got {:?}", headers.title());
             assert_eq!(
-                headers.description.as_ref().unwrap(),
+                headers.description(),
                 "example post with separator and newlines",
                 "got {:?}",
-                headers.description.as_ref().unwrap()
+                headers.description()
             );
-            assert_eq!(
-                headers.created_at,
-                Some("2026-06-26".to_string()),
-                "got {:?}",
-                headers.created_at
-            );
+            assert_eq!(headers.created_at(), "2026-06-26");
+        }
+
+        #[test]
+        fn preserves_creation_dates_for_posts_and_nonposts() {
+            for is_post in ["yes", "no"] {
+                let header_str = format!(
+                    "title: Example\ndescription: Example description\ncreated_at: 2026-06-26\nis_post: {is_post}\n"
+                );
+                let headers = parse_kv_block::<PageHeaders>(&header_str).unwrap();
+
+                assert_eq!(headers.created_at(), Some("2026-06-26"));
+            }
+        }
+
+        #[test]
+        fn rejects_removed_update_date_header() {
+            for is_post in ["yes", "no"] {
+                let header_str = format!(
+                    "title: Example\ndescription: Example description\ncreated_at: 2026-06-26\n\
+                     updated_at: 2026-07-01\nis_post: {is_post}\n"
+                );
+                let headers = parse_kv_block::<PageHeaders>(&header_str);
+
+                assert!(matches!(
+                    headers,
+                    Err(ParseKeyValueBlockError {
+                        line: 4,
+                        kind: ParseKeyValueBlockKind::UnknownKey(key),
+                    }) if key == "updated_at"
+                ));
+            }
+        }
+
+        #[test]
+        fn nonposts_can_omit_description_and_creation_date() {
+            let headers = parse_kv_block::<PageHeaders>("title: Example\nis_post: no\n").unwrap();
+            let PageHeaders::NonPost(headers) = headers else {
+                panic!("is_post: no produces nonpost headers");
+            };
+
+            assert_eq!(headers.description(), None);
+            assert_eq!(headers.created_at(), None);
+            assert_eq!(headers.title(), "Example");
+        }
+
+        #[test]
+        fn rejects_duplicate_creation_dates() {
+            let headers =
+                parse_kv_block::<PageHeaders>("title: Example\ncreated_at: 2026-07-01\ncreated_at: 2026-07-02\n");
+
+            assert!(matches!(
+                headers,
+                Err(ParseKeyValueBlockError {
+                    line: 3,
+                    kind: ParseKeyValueBlockKind::DuplicateKey(key),
+                }) if key == "created_at"
+            ));
         }
 
         #[test]
@@ -1120,8 +1444,8 @@ mod tests {
 
             let headers = parse_kv_block::<PageHeaders>(header_str).unwrap();
 
-            assert_eq!(headers.title, "Example");
-            assert_eq!(headers.description, Some("example post with blank lines".to_string()));
+            assert_eq!(headers.title(), "Example");
+            assert_eq!(headers.description(), Some("example post with blank lines"));
         }
 
         #[test]
@@ -1132,9 +1456,9 @@ mod tests {
 
             let headers = parse_kv_block::<PageHeaders>(header_str).unwrap();
 
-            assert_eq!(headers.title, "Example Page");
-            assert_eq!(headers.description, Some("example post with padded fields".to_string()));
-            assert_eq!(headers.created_at, Some("2026-06-26".to_string()));
+            assert_eq!(headers.title(), "Example Page");
+            assert_eq!(headers.description(), Some("example post with padded fields"));
+            assert_eq!(headers.created_at(), Some("2026-06-26"));
         }
 
         #[test]
@@ -1147,11 +1471,8 @@ mod tests {
 
             let headers = parse_kv_block::<PageHeaders>(header_str).unwrap();
 
-            assert_eq!(headers.title, "Example: A Post");
-            assert_eq!(
-                headers.description,
-                Some("see https://example.com for details".to_string())
-            );
+            assert_eq!(headers.title(), "Example: A Post");
+            assert_eq!(headers.description(), Some("see https://example.com for details"));
         }
 
         #[test]
@@ -1283,15 +1604,15 @@ mod tests {
 
             let headers = parse_kv_block::<PageHeaders>(header_str).unwrap();
 
-            assert_eq!(headers.css_classes, None, "got {:?}", headers.css_classes);
-            assert_eq!(headers.css_stylesheet, None, "got {:?}", headers.css_stylesheet);
+            assert_eq!(headers.css_classes(), None, "got {:?}", headers.css_classes());
+            assert_eq!(headers.css_stylesheet(), None, "got {:?}", headers.css_stylesheet());
 
             // boolean fields
-            assert!(headers.is_post, "got {:?}", headers.is_post);
-            assert!(headers.include_header, "got {:?}", headers.include_header);
-            assert!(headers.include_footer, "got {:?}", headers.include_footer);
-            assert!(headers.include_title, "got {:?}", headers.include_title);
-            assert!(headers.include_styles, "got {:?}", headers.include_styles);
+            assert!(headers.is_post(), "got {:?}", headers.is_post());
+            assert!(headers.include_header(), "got {:?}", headers.include_header());
+            assert!(headers.include_footer(), "got {:?}", headers.include_footer());
+            assert!(headers.include_title(), "got {:?}", headers.include_title());
+            assert!(headers.include_styles(), "got {:?}", headers.include_styles());
         }
 
         #[test]
@@ -1314,20 +1635,20 @@ mod tests {
 
             let headers = parse_kv_block::<PageHeaders>(header_str).unwrap();
 
-            assert_eq!(headers.created_at, Some("2026-06-26".to_string()));
+            assert_eq!(headers.created_at(), Some("2026-06-26"));
 
-            assert_eq!(headers.css_classes, Some("wide".to_string()));
-            assert_eq!(headers.css_stylesheet, Some("/style/page.css".to_string()));
+            assert_eq!(headers.css_classes(), Some("wide"));
+            assert_eq!(headers.css_stylesheet(), Some("/style/page.css"));
 
-            assert!(!headers.is_post, "got {:?}", headers.is_post);
+            assert!(!headers.is_post(), "got {:?}", headers.is_post());
 
             // added even despite page not being a post
-            assert!(headers.include_title, "got {:?}", headers.include_title);
-            assert!(headers.include_styles, "got {:?}", headers.include_styles);
+            assert!(headers.include_title(), "got {:?}", headers.include_title());
+            assert!(headers.include_styles(), "got {:?}", headers.include_styles());
 
             // set by default
-            assert!(!headers.include_header, "got {:?}", headers.include_header);
-            assert!(!headers.include_footer, "got {:?}", headers.include_footer);
+            assert!(!headers.include_header(), "got {:?}", headers.include_header());
+            assert!(!headers.include_footer(), "got {:?}", headers.include_footer());
         }
 
         #[test]
@@ -1347,11 +1668,11 @@ mod tests {
 
             let headers = parse_kv_block::<PageHeaders>(header_str).unwrap();
 
-            assert!(headers.is_post, "got {:?}", headers.is_post);
-            assert!(headers.include_header, "got {:?}", headers.include_header);
-            assert!(!headers.include_footer, "got {:?}", headers.include_footer);
-            assert!(!headers.include_title, "got {:?}", headers.include_title);
-            assert!(!headers.include_styles, "got {:?}", headers.include_styles);
+            assert!(headers.is_post(), "got {:?}", headers.is_post());
+            assert!(headers.include_header(), "got {:?}", headers.include_header());
+            assert!(!headers.include_footer(), "got {:?}", headers.include_footer());
+            assert!(!headers.include_title(), "got {:?}", headers.include_title());
+            assert!(!headers.include_styles(), "got {:?}", headers.include_styles());
         }
     }
 
@@ -1464,18 +1785,19 @@ mod tests {
         }
 
         fn headers_full() -> PageHeaders {
-            PageHeaders {
-                title: "Example Post".to_string(),
-                description: Some("An example post".to_string()),
-                created_at: Some("2026-06-26".to_string()),
-                css_classes: Some("post".to_string()),
-                css_stylesheet: Some("/styles/example.css".to_string()),
-                is_post: true,
-                include_header: true,
-                include_footer: true,
-                include_title: true,
-                include_styles: true,
-            }
+            PageHeaders::Post(PostHeaders {
+                common: CommonHeaders {
+                    title: "Example Post".to_string(),
+                    css_classes: Some("post".to_string()),
+                    css_stylesheet: Some("/styles/example.css".to_string()),
+                    include_header: true,
+                    include_footer: true,
+                    include_title: true,
+                    include_styles: true,
+                },
+                description: "An example post".to_string(),
+                created_at: "2026-06-26".to_string(),
+            })
         }
 
         fn diff(actual: &str, expected: &str) -> Result<String, fmt::Error> {

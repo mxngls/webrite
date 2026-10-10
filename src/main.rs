@@ -8,13 +8,13 @@ use crate::page::{
     write_page,
 };
 
-fn build_page(input_path: &Path, blocks: &Blocks) -> Result<Page, Error> {
-    let page_str = fs::read_to_string(input_path).at_path(input_path)?;
+fn build_page(page_path: &Path, blocks: &Blocks) -> Result<Page, Error> {
+    let page_str = fs::read_to_string(page_path).at_path(page_path)?;
 
-    let (headers, body) = split_page(&page_str).at_path(input_path)?;
-    let headers = parse_kv_block(headers).at_path(input_path)?;
+    let (headers, body) = split_page(&page_str).at_path(page_path)?;
+    let headers = parse_kv_block(headers).at_path(page_path)?;
 
-    let rel_path = input_path
+    let rel_path = page_path
         .strip_prefix(IN_DIR)
         .expect("file paths descend from the input directory");
 
@@ -57,7 +57,7 @@ fn build_site(input_dir: &Path) -> Result<(), Error> {
                 fs::create_dir_all(&out_dir).at_path(&out_dir)?;
                 dir_stack.push(path);
             } else if path.extension().is_some_and(|ext| ext == "htm") {
-                process_file(&path, &blocks)?;
+                build_page(&path, &blocks)?;
             } else {
                 fs::copy(&path, &out_dir).at_path(&out_dir)?;
             }
