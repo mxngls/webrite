@@ -32,10 +32,13 @@ fn build_site(config_path: &Path) -> Result<(), Error> {
     };
     let config = parse_config(&config_str).at_path(config_path)?;
 
+    let out_path = Path::new(config.build().out());
     let in_path = Path::new(config.build().r#in());
     let blocks = Blocks::from_dir(&in_path.to_path_buf().join(config.build().blocks()))?;
 
     let mut dir_stack = vec![in_path.to_path_buf()];
+
+    fs::create_dir(out_path).at_path(out_path)?;
 
     while let Some(dir) = dir_stack.pop() {
         for entry in fs::read_dir(&dir).at_path(&dir)? {
